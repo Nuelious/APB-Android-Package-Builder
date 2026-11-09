@@ -1,14 +1,24 @@
 # APB configuration
 
-Each imported project gets a plain-text `apb.json` in its root. APB scans the folder, asks the user to confirm the detected project type, then generates the file. It remains editable with any file manager or text editor.
+Every imported project receives a plain-text `apb.json` in its selected source folder. APB copies the source into its private build workspace, scans it, asks the user to choose a project type, and generates the configuration.
 
-- `format` is `APB`; `format_version` identifies the schema.
-- `project.type` describes project/build format, not import source.
-- GitHub is an import source; repositories may contain any supported project type.
-- Paths are relative to `source.root`.
-- APB reloads and validates the JSON before each build.
-- Invalid JSON or unsupported versions stop the build with a useful diagnostic.
-- Treat configuration as declarative data, never as an implicit shell script.
-- Normalize paths and ensure they remain inside the selected project.
+## External editing
+- APB writes `apb.json` into the original folder through the persisted Android Storage Access Framework permission.
+- Edit that file with any file manager or text editor that can access the selected folder.
+- APB reloads the external file before listing/building the project.
+- The in-app editor saves to both the private build copy and original selected folder.
+- If the JSON is malformed, APB reports the project as invalid; correct the file externally.
 
-Schema: `schemas/apb-schema-v1.json`. Templates: `templates/`.
+## Fields
+- `format` must be `APB`; `format_version` identifies the schema.
+- `project.type` describes the build/source format.
+- `source.root` and `build.output` are relative paths confined to the imported project.
+- `runtime.environment` is `apb-native` or `apb-linux`.
+- `build.engine` selects Gradle, APKTool, Smali, DEX or Custom.
+
+GitHub is an import source, not a compiler type. Public GitHub repositories can be downloaded by URL and branch; the user chooses an empty destination folder and then confirms the project type.
+
+## Security
+APB configuration is declarative data, never a shell script. APB rejects absolute paths and parent traversal. Imported Gradle build scripts are still executable code, so only build projects from trusted sources.
+
+Schema: `schemas/apb-schema-v1.json`. Starter configurations: `templates/`.
