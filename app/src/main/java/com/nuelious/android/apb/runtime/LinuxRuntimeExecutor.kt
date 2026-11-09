@@ -32,11 +32,11 @@ class LinuxRuntimeExecutor(private val runtime:File, private val project:File) {
    "-w",workspace,
    "/usr/bin/env",
    "HOME=/root","TMPDIR=/tmp",
-   "JAVA_HOME=$runtimeMount/jdk",
+   "JAVA_HOME=$runtimeMount/jdk17-arm64",
    "GRADLE_USER_HOME=/root/.gradle",
    "ANDROID_HOME=$runtimeMount/android-sdk",
    "ANDROID_SDK_ROOT=$runtimeMount/android-sdk",
-   "PATH=$runtimeMount/jdk/bin:$runtimeMount/gradle/bin:$runtimeMount/android-sdk/platform-tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+   "PATH=$runtimeMount/jdk17-arm64/bin:$runtimeMount/gradle-8/bin:$runtimeMount/android-sdk/platform-tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
   )
   args.addAll(command)
   val pb=ProcessBuilder(args).directory(project).redirectErrorStream(true)
