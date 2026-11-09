@@ -1,9 +1,9 @@
 name: Build and publish APB ARM64 runtime
 
 on:
+  # Publishing on every feature-branch push created many competing "latest"
+  # releases. Publish only explicit version tags or a deliberate manual run.
   push:
-    branches:
-      - "feature/private-runtime-storage-file-manager"
     tags:
       - "runtime-v*"
   workflow_dispatch:
@@ -65,7 +65,7 @@ jobs:
       - name: Publish runtime release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('runtime-manual-{0}', github.run_number) }}
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('runtime-v{0}', github.run_number) }}
           name: APB ARM64 Runtime ${{ github.ref_name }}
           files: |
             apb-runtime-arm64.tar.gz
