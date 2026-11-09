@@ -1,36 +1,73 @@
 package com.nuelious.android.apb
 
 import android.os.Bundle
+import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.lifecycleScope
+import com.nuelious.android.apb.core.BuildCoordinator
+import com.nuelious.android.apb.data.ApbProject
+import com.nuelious.android.apb.storage.ProjectStore
+import kotlinx.coroutines.launch
 
-class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContent { ApbApp() }
+class MainActivity:ComponentActivity(){
+ private lateinit var store:ProjectStore
+ private lateinit var builder:BuildCoordinator
+ private var projects by mutableStateOf<List<ApbProject>>(emptyList())
+ private var selected by mutableStateOf<ApbProject?>(null)
+ private var status by mutableStateOf("Ready")
+ private var logs by mutableStateOf("")
+ private val picker by lazy { registerForActivityResult(ActivityResultContracts.OpenDocumentTree()){uri->
+  if(uri!=null){
+   contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+   lifecycleScope.launch { status="Importing and scanning…"
+    runCatching{store.importTree(uri)}.onSuccess{selected=it;refresh();status="Imported ${it.name}"}
+     .onFailure{status="Import failed: ${it.message}"}
+   }
+  }
+ }}
+ override fun onCreate(savedInstanceState:Bundle?){super.onCreate(savedInstanceState)
+  store=ProjectStore(this);builder=BuildCoordinator(this);refresh()
+  setContent { MaterialTheme {
+   Scaffold(topBar={TopAppBar(title={Text("APB · Android Package Builder")})}){padding->
+    LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
+     item { Text("Project workspace",style=MaterialTheme.typography.headlineSmall)
+      Text("Import Android Studio, APKTool, Smali and DEX project folders.")
+      Row { Button(onClick={picker.launch(null)}){Text("Import folder")};Spacer(Modifier.width(8.dp));OutlinedButton(onClick={refresh()}){Text("Refresh")} }
+     }
+     if(projects.isEmpty()) item { Text("No projects yet. Import a folder to create its apb.json configuration.") }
+     items(projects,key={it.id}){p->Card(onClick={selected=p},modifier=Modifier.fillMaxWidth(),
+      colors=CardDefaults.cardColors(containerColor=if(selected?.id==p.id)MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant)){
+       Column(Modifier.padding(14.dp)){Text(p.name,style=MaterialTheme.typography.titleMedium);Text(p.type.label,style=MaterialTheme.typography.bodySmall)}
+      }}
+     selected?.let { p -> item {
+      Text("Selected: ${p.name}",style=MaterialTheme.typography.titleLarge)
+      Text("Project configuration: ${p.configFile.absolutePath}",style=MaterialTheme.typography.bodySmall)
+      Row { Button(onClick={build(p)}){Text("Build APK")};Spacer(Modifier.width(6.dp))
+       OutlinedButton(onClick={startActivity(Intent(this@MainActivity,ConfigEditorActivity::class.java).putExtra(ConfigEditorActivity.EXTRA_PROJECT_ID,p.id))}){Text("Edit apb.json")} }
+      TextButton(onClick={store.delete(p);selected=null;refresh()}){Text("Remove project")}
+     }}
+     item { Text(status,style=MaterialTheme.typography.titleMedium);if(logs.isNotBlank())Card(Modifier.fillMaxWidth()){Text(logs.takeLast(14000),Modifier.padding(12.dp),style=MaterialTheme.typography.bodySmall)} }
+     item { Text("Runtime status",style=MaterialTheme.typography.titleMedium)
+      Text("APB does not require Termux or root. A compatible Java/Gradle/Android SDK runtime must be installed before Gradle builds can run.") }
     }
-}
-
-@Composable
-private fun ApbApp() {
-    MaterialTheme {
-        Surface(Modifier.fillMaxSize()) {
-            Column(
-                Modifier.fillMaxSize().padding(24.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text("APB", style = MaterialTheme.typography.displayLarge)
-                Text("Android Package Builder", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(20.dp))
-                Text("Foundation build — project importer and build runtime are under development.")
-            }
-        }
-    }
+   }
+  }}
+ }
+ private fun refresh(){projects=store.listProjects();selected=selected?.let{s->projects.firstOrNull{it.id==s.id}}}
+ private fun build(p:ApbProject){lifecycleScope.launch{
+  logs="";status="Building…"
+  val r=builder.build(p){line->runOnUiThread{logs+=line+"\n"}}
+  status=if(r.success)"Build complete" else "Build failed: ${r.message}"
+  logs+="\n"+r.message+(r.output?.let{"\nAPK: $it"}?:"")
+ }}
+ override fun onResume(){super.onResume();if(::store.isInitialized)refresh()}
 }
