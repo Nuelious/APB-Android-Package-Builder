@@ -96,7 +96,8 @@ class MainActivity:ComponentActivity(){
  private fun refresh(){projects=store.listProjects();selected=selected?.let{s->projects.firstOrNull{it.id==s.id}}}
  private fun build(p:ApbProject){lifecycleScope.launch{
   logs="";status="Building…"
-  store.syncConfig(p)\n  val r=builder.build(p){line->runOnUiThread{logs+=line+"\n"}}
+  store.syncConfig(p)
+  val r=builder.build(p){line->runOnUiThread{logs+=line+"\n"}}
   lastApkPath=r.output
   status=if(r.success)"Build complete" else "Build failed: ${r.message}"
   logs+="\n"+r.message+(r.output?.let{"\nAPK: $it"}?:"")
