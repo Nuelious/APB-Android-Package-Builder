@@ -70,5 +70,25 @@ class ProjectStore(private val context:Context) {
    }
   }
  }
- fun delete(p:ApbProject){require(p.root.canonicalPath.startsWith(base.canonicalPath+File.separator));p.root.deleteRecursively();prefs.edit().remove("tree:${p.id}").apply()}
+
+ fun copyLocalToTree(source:File,treeUri:Uri) {
+  require(source.isDirectory){"Downloaded repository folder is missing"}
+  val destination=DocumentFile.fromTreeUri(context,treeUri)?:error("Cannot open destination folder")
+  copyLocalContents(source,destination)
+ }
+ private fun copyLocalContents(source:File,destination:DocumentFile) {
+  source.listFiles()?.forEach { file ->
+   if(file.name==".git") return@forEach
+   if(file.isDirectory) {
+    val child=destination.findFile(file.name)?.also{it.delete()}?.let{destination.createDirectory(file.name)}
+      ?:destination.createDirectory(file.name)
+    if(child!=null)copyLocalContents(file,child)
+   } else if(file.isFile) {
+    destination.findFile(file.name)?.delete()
+    val child=destination.createFile("application/octet-stream",file.name)?:error("Cannot create ${file.name}")
+    file.inputStream().use{input->context.contentResolver.openOutputStream(child.uri)?.use{input.copyTo(it)}?:error("Cannot write ${file.name}")}
+   }
+  }
+ }
+\n fun delete(p:ApbProject){require(p.root.canonicalPath.startsWith(base.canonicalPath+File.separator));p.root.deleteRecursively();prefs.edit().remove("tree:${p.id}").apply()}
 }
