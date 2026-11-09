@@ -1,0 +1,8 @@
+{
+ "format":"APB","format_version":1,
+ "project":{"name":"Class2SmaliProject","type":"class2smali","description":"Decompiled Java bytecode represented as Smali source"},
+ "source":{"root":".","manifest":"AndroidManifest.xml","modules":[],"smali_directories":["smali","smali_classes2"],"resources":"res","apktool_file":"apktool.yml"},
+ "runtime":{"environment":"apb-linux","java_version":"17"},
+ "build":{"engine":"smali","output":"dist","filename":"Class2SmaliProject-unsigned.apk","offline":true},
+ "options":{"sign_apk":true,"zipalign":true}
+}
