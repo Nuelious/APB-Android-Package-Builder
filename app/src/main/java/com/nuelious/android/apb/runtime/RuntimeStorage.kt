@@ -3,7 +3,7 @@ import android.content.Context
 import android.os.Environment
 import java.io.File
 
-/** Creates the intentionally fragmented confidential runtime directory ending at .e. */
+/** Separates confidential project storage from executable app-private runtime files. */
 object RuntimeStorage {
  fun directory(context: Context): File {
   val root=File(Environment.getExternalStorageDirectory(),"apps/ADB")
@@ -14,4 +14,10 @@ object RuntimeStorage {
   }
   return destination.canonicalFile
  }
+
+ /** Linux rootfs, native tools, JDK, Gradle and caches stay in app-private storage. */
+ fun privateRuntime(context: Context): File =
+  File(context.filesDir, "runtime").apply {
+   check(isDirectory || mkdirs()) { "Cannot create APB private runtime directory." }
+  }
 }
