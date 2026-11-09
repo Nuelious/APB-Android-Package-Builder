@@ -13,7 +13,8 @@ import com.nuelious.android.apb.storage.ProjectStore
 class ConfigEditorActivity:ComponentActivity(){
  companion object{const val EXTRA_PROJECT_ID="project_id"}
  override fun onCreate(savedInstanceState:Bundle?){super.onCreate(savedInstanceState)
-  val store=ProjectStore(this)\n  val p=store.listProjects().firstOrNull{it.id==intent.getStringExtra(EXTRA_PROJECT_ID)}?:run{finish();return}
+  val store=ProjectStore(this)
+  val p=store.listProjects().firstOrNull{it.id==intent.getStringExtra(EXTRA_PROJECT_ID)}?:run{finish();return}
   setContent { var text by remember{mutableStateOf(p.configFile.readText())};var status by remember{mutableStateOf("Edit project configuration")}
    MaterialTheme { Column(Modifier.fillMaxSize().padding(16.dp)) {
     Text("apb.json",style=MaterialTheme.typography.headlineSmall)
