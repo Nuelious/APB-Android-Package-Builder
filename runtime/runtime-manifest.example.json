@@ -1,8 +1,11 @@
 {
  "manifest_version":1,
  "components":[
+  {"id":"proot-arm64","version":"tested-release","abi":["arm64-v8a"],"archive":"proot-arm64.zip","sha256":"REPLACE_WITH_RELEASE_SHA256","license":"PRoot license"},
+  {"id":"linux-rootfs-arm64","version":"arm64-rootfs-release","abi":["arm64-v8a"],"archive":"linux-rootfs-arm64.zip","sha256":"REPLACE_WITH_RELEASE_SHA256","license":"See included distribution licenses"},
   {"id":"jdk17-arm64","version":"17","abi":["arm64-v8a"],"archive":"jdk17-arm64.zip","sha256":"REPLACE_WITH_RELEASE_SHA256","license":"OpenJDK distribution license"},
   {"id":"gradle-8","version":"8.9","abi":["all"],"archive":"gradle-8.zip","sha256":"REPLACE_WITH_RELEASE_SHA256","license":"Apache-2.0"},
-  {"id":"apktool","version":"2.x","abi":["all"],"archive":"apktool-tools.zip","sha256":"REPLACE_WITH_RELEASE_SHA256","license":"Apache-2.0"}
+  {"id":"android-sdk","version":"35","abi":["arm64-v8a"],"archive":"android-sdk-arm64.zip","sha256":"REPLACE_WITH_RELEASE_SHA256","license":"Android SDK license terms"},
+  {"id":"apktool","version":"2.x","abi":["all"],"archive":"apktool.zip","sha256":"REPLACE_WITH_RELEASE_SHA256","license":"Apache-2.0"}
  ]
 }
