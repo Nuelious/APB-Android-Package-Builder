@@ -1,14 +1,17 @@
 package com.nuelious.android.apb.core
 
+import android.content.Context
 import com.nuelious.android.apb.runtime.LinuxRuntimeExecutor
+import com.nuelious.android.apb.runtime.RuntimeStorage
 import java.io.File
 
 class ApkPostProcessor(
- private val runtime:File,
+ private val context:Context,
  private val project:File,
  private val linux:Boolean,
  private val onLog:(String)->Unit
 ) {
+ private val runtime:File get()=File(RuntimeStorage.privateRuntime(context),"active")
  fun process(input:File,align:Boolean,sign:Boolean):File {
   var current=input
   val outputDir=File(input.parentFile,"apb-final").apply{mkdirs()}
@@ -34,7 +37,7 @@ class ApkPostProcessor(
  }
  private fun path(file:File):String=if(linux)"/workspace/"+file.relativeTo(project).invariantSeparatorsPath else file.absolutePath
  private fun runTool(name:String,args:List<String>) {
-  val process=if(linux) LinuxRuntimeExecutor(runtime,project).start(listOf(name)+args) else {
+  val process=if(linux) LinuxRuntimeExecutor(context,project).start(listOf(name)+args) else {
    val exe=runtime.walkTopDown().maxDepth(9).firstOrNull{it.isFile&&it.name==name&&it.canExecute()}
     ?:error("Missing required APK post-processing tool: $name")
    val pb=ProcessBuilder(listOf(exe.absolutePath)+args).directory(project).redirectErrorStream(true)
