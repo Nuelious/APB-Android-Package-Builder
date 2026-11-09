@@ -28,5 +28,6 @@ dependencies {
  implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
  implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
  debugImplementation("androidx.compose.ui:ui-tooling")
- testImplementation("junit:junit:4.13.2")\n testImplementation("org.json:json:20240303")
+ testImplementation("junit:junit:4.13.2")
+ testImplementation("org.json:json:20240303")
 }
