@@ -2,6 +2,7 @@ package com.nuelious.android.apb
 
 import android.os.Bundle
 import android.content.Intent
+import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -15,9 +16,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import com.nuelious.android.apb.core.BuildCoordinator
 import com.nuelious.android.apb.data.ApbProject
+import com.nuelious.android.apb.data.ProjectType
 import com.nuelious.android.apb.storage.ProjectStore
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalMaterial3Api::class)
 class MainActivity:ComponentActivity(){
  private lateinit var store:ProjectStore
  private lateinit var builder:BuildCoordinator
@@ -25,13 +28,12 @@ class MainActivity:ComponentActivity(){
  private var selected by mutableStateOf<ApbProject?>(null)
  private var status by mutableStateOf("Ready")
  private var logs by mutableStateOf("")
+ private var pendingUri by mutableStateOf<Uri?>(null)
+ private var showTypeDialog by mutableStateOf(false)
  private val picker by lazy { registerForActivityResult(ActivityResultContracts.OpenDocumentTree()){uri->
   if(uri!=null){
    contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-   lifecycleScope.launch { status="Importing and scanning…"
-    runCatching{store.importTree(uri)}.onSuccess{selected=it;refresh();status="Imported ${it.name}"}
-     .onFailure{status="Import failed: ${it.message}"}
-   }
+   pendingUri=uri;showTypeDialog=true
   }
  }}
  override fun onCreate(savedInstanceState:Bundle?){super.onCreate(savedInstanceState)
@@ -42,6 +44,7 @@ class MainActivity:ComponentActivity(){
      item { Text("Project workspace",style=MaterialTheme.typography.headlineSmall)
       Text("Import Android Studio, APKTool, Smali and DEX project folders.")
       Row { Button(onClick={picker.launch(null)}){Text("Import folder")};Spacer(Modifier.width(8.dp));OutlinedButton(onClick={refresh()}){Text("Refresh")} }
+      OutlinedButton(onClick={startActivity(Intent(this@MainActivity,com.nuelious.android.apb.runtime.RuntimeManagerActivity::class.java))}){Text("Runtime Manager")}
      }
      if(projects.isEmpty()) item { Text("No projects yet. Import a folder to create its apb.json configuration.") }
      items(projects,key={it.id}){p->Card(onClick={selected=p},modifier=Modifier.fillMaxWidth(),
@@ -57,9 +60,26 @@ class MainActivity:ComponentActivity(){
      }}
      item { Text(status,style=MaterialTheme.typography.titleMedium);if(logs.isNotBlank())Card(Modifier.fillMaxWidth()){Text(logs.takeLast(14000),Modifier.padding(12.dp),style=MaterialTheme.typography.bodySmall)} }
      item { Text("Runtime status",style=MaterialTheme.typography.titleMedium)
-      Text("APB does not require Termux or root. A compatible Java/Gradle/Android SDK runtime must be installed before Gradle builds can run.") }
+      Text("APB does not require Termux or root. Gradle builds need a compatible Java, Gradle and Android SDK runtime.") }
     }
    }
+   if(showTypeDialog) AlertDialog(
+    onDismissRequest={showTypeDialog=false;pendingUri=null},
+    title={Text("Select project type")},
+    text={Column(verticalArrangement=Arrangement.spacedBy(6.dp)){
+     Text("Choose the format APB should use to configure this folder.")
+     ProjectType.entries.forEach { type ->
+      OutlinedButton(modifier=Modifier.fillMaxWidth(),onClick={
+       val uri=pendingUri;showTypeDialog=false;pendingUri=null
+       if(uri!=null) lifecycleScope.launch { status="Importing as ${type.label}…"
+        runCatching{store.importTree(uri,type)}.onSuccess{selected=it;refresh();status="Imported ${it.name}"}
+         .onFailure{status="Import failed: ${it.message}"}
+       }
+      }){Text(type.label)}
+     }
+    }},
+    confirmButton={TextButton(onClick={showTypeDialog=false;pendingUri=null}){Text("Cancel")}}
+   )
   }}
  }
  private fun refresh(){projects=store.listProjects();selected=selected?.let{s->projects.firstOrNull{it.id==s.id}}}
