@@ -1,37 +1,29 @@
 # Runtime architecture
 
-APB is a standalone Android app and does not require Termux or root.
+## Requested storage layout
+APB creates its runtime and confidential-file directory outside the APK at:
+
+`/storage/emulated/0/apps/ADB/.t/.h/.i/.s/.i/.s/.p/.r/.i/.v/.a/.t/.e`
+
+The hidden nested folders are intentional and stop at `.e`. Runtime components, build caches and confidential files can be stored there. The APB File Manager has an External Storage tab and an APB Private tab. The latter browses APB's own sandbox at `/data/user/0/com.nuelious.android.package.builder.apb/`.
+
+On Android 11+, managing arbitrary shared-storage paths requires Android's all-files-access special permission. APB provides a button to open the system settings page; the user must grant access.
 
 ## Runtime modes
 - `apb-native`: run a verified Android-compatible executable directly.
 - `apb-linux`: run Linux ARM64 userspace tools through an Android/ARM64 PRoot executable.
 
-The PRoot runner binds the selected project as `/workspace`, binds APB's installed runtime as `/apb-runtime`, and exposes Android `/dev`, `/proc`, `/sys` and `/system` to the Linux rootfs. Java, Gradle and SDK paths are configured in the Linux process environment.
+## Required runtime components
+- Android/ARM64 PRoot executable.
+- ARM64 Linux root filesystem.
+- Linux ARM64 JDK 17.
+- Gradle 8.
+- Android SDK/build-tools compiled for a compatible host ABI.
+- APKTool JAR.
 
-## Components
-The example runtime manifest describes separate components:
-- `proot-arm64`: native Android ARM64 PRoot executable.
-- `linux-rootfs-arm64`: ARM64 Linux root filesystem with `/bin` and `/usr`.
-- `jdk17-arm64`: Linux ARM64 JDK compatible with the rootfs.
-- `gradle-8`: Gradle distribution.
-- `android-sdk`: SDK platform/build tools compiled for a compatible host ABI.
-- `apktool`: APKTool JAR.
+## Runtime readiness warning
+The manual Runtime Manager screen has been removed. APB now points its runtime runner at the requested external folder, but the repository still does **not** contain real, verified ARM64 runtime archives or binaries. The app is therefore not yet a ready-to-use offline compiler. A compatible toolchain still needs to be supplied and tested.
 
-Install each archive using Runtime Manager and a trusted SHA-256. The example manifest deliberately contains placeholder hashes; it is not a downloadable runtime release.
+Android SDK host tools are often x86_64-only. A Linux ARM64 rootfs does not translate x86_64/glibc executables into ARM64 binaries. Verify each native tool on the target device.
 
-## Critical compatibility warning
-A Linux userspace does not translate x86_64/glibc binaries into ARM64 binaries. Every native executable must match the phone ABI and its libc expectations. Android SDK host tools are often distributed only for x86_64; an ARM64-compatible SDK/build-tools set must be sourced or built separately. Do not assume the standard desktop SDK archive works on an ARM64 phone.
-
-PRoot is not a virtual machine or a security boundary. Treat imported build scripts as untrusted code and build only projects you trust.
-
-## Validation gate before calling the runtime complete
-On a real ARM64 device:
-1. Verify PRoot starts and mounts the rootfs.
-2. Run Linux ARM64 `java -version` and `gradle --version`.
-3. Install a matching Android SDK platform and build-tools.
-4. Build a minimal Android project online, then offline with dependencies cached.
-5. Build an APKTool project.
-6. Verify APK alignment, signing and signature.
-7. Test process cancellation, log capture, disk-full, low-memory and corrupted archive recovery.
-
-Runtime payloads are not bundled with the source repository. The app-side installer and PRoot command runner are implemented, but a tested distributable toolchain bundle remains a separate deliverable.
+PRoot is not a security boundary. Imported Gradle scripts are executable code; build only trusted projects. Hidden folder names are not encryption.
