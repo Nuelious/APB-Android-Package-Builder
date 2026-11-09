@@ -1,11 +1,11 @@
+import java.security.MessageDigest
+import java.util.zip.ZipFile
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
-
-import java.security.MessageDigest
-import java.util.zip.ZipFile
 
 val generatedProot = layout.buildDirectory.dir("generated/proot")
 val prepareArm64Proot by tasks.registering {
@@ -24,18 +24,15 @@ val prepareArm64Proot by tasks.registering {
             "PRoot archive checksum mismatch"
         }
         val nativeDir = root.resolve("jni/arm64-v8a").apply { mkdirs() }
-        val assetDir = root.resolve("assets/proot-loader").apply { mkdirs() }
+        
         ZipFile(zip).use { archive ->
             val binary = archive.getEntry("proot") ?: error("PRoot archive has no proot executable")
             archive.getInputStream(binary).use { it.copyTo(nativeDir.resolve("libproot.so").outputStream()) }
             val entries = archive.entries()
             while (entries.hasMoreElements()) {
                 val entry = entries.nextElement()
-                if (!entry.isDirectory && entry.name.startsWith("loader/")) {
-                    val relative = entry.name.removePrefix("loader/")
-                    val destination = assetDir.resolve(relative)
-                    destination.parentFile.mkdirs()
-                    archive.getInputStream(entry).use { it.copyTo(destination.outputStream()) }
+                if (!entry.isDirectory && entry.name == "loader/loader") {
+                    archive.getInputStream(entry).use { it.copyTo(nativeDir.resolve("libproot-loader.so").outputStream()) }
                 }
             }
         }
@@ -55,7 +52,6 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     sourceSets["main"].jniLibs.srcDir(generatedProot.map { it.dir("jni") })
-    sourceSets["main"].assets.srcDir(generatedProot.map { it.dir("assets") })
     tasks.named("preBuild").configure { dependsOn(prepareArm64Proot) }
     buildFeatures { compose = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }

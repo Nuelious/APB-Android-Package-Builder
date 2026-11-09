@@ -14,6 +14,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
+import com.nuelious.android.apb.runtime.RuntimeBootstrap
+import com.nuelious.android.apb.runtime.RuntimeProgress
 import com.nuelious.android.apb.core.BuildCoordinator
 import com.nuelious.android.apb.data.ApbProject
 import com.nuelious.android.apb.data.ProjectType
@@ -31,6 +33,10 @@ class MainActivity:ComponentActivity(){
  private var status by mutableStateOf("Ready")
  private var logs by mutableStateOf("")
  private var lastApkPath by mutableStateOf<String?>(null)
+ private var runtimeReady by mutableStateOf(false)
+ private var runtimeBusy by mutableStateOf(false)
+ private var runtimeProgress by mutableStateOf(RuntimeProgress("Runtime not installed"))
+ private var runtimeError by mutableStateOf<String?>(null)
  private var pendingUri by mutableStateOf<Uri?>(null)
  private var showTypeDialog by mutableStateOf(false)
  private val exportPicker=registerForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.android.package-archive")){uri->
@@ -40,12 +46,28 @@ class MainActivity:ComponentActivity(){
  private val picker=registerForActivityResult(ActivityResultContracts.OpenDocumentTree()){uri->
   if(uri!=null){contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION);pendingUri=uri;showTypeDialog=true}
  }
- override fun onCreate(savedInstanceState:Bundle?){super.onCreate(savedInstanceState);store=ProjectStore(this);builder=BuildCoordinator(this);refresh()
+ override fun onCreate(savedInstanceState:Bundle?){super.onCreate(savedInstanceState);store=ProjectStore(this);builder=BuildCoordinator(this);refresh();runtimeReady=RuntimeBootstrap(this).isInstalled()
   setContent{MaterialTheme{Scaffold(topBar={TopAppBar(title={Text("APB · Android Package Builder")})}){padding->
    LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
     item{Text("Project workspace",style=MaterialTheme.typography.headlineSmall);Text("Import Android Studio, APKTool, Smali and DEX project folders.")
      Row{Button(onClick={picker.launch(null)}){Text("Import folder")};Spacer(Modifier.width(8.dp));OutlinedButton(onClick={startActivity(Intent(this@MainActivity,GitHubImportActivity::class.java))}){Text("Import GitHub")}}
      OutlinedButton(onClick={refresh()}){Text("Refresh")};OutlinedButton(onClick={startActivity(Intent(this@MainActivity,FileManagerActivity::class.java))}){Text("Open File Manager")}
+    }
+    item {
+     Card(Modifier.fillMaxWidth()) {
+      Column(Modifier.padding(14.dp), verticalArrangement=Arrangement.spacedBy(8.dp)) {
+       Text("ARM64 build environment", style=MaterialTheme.typography.titleMedium)
+       Text(if(runtimeReady) "Linux ARM64, JDK 17, Gradle and Android build tools are installed in APB private storage."
+            else "The initial runtime download is several hundred MB and needs over 1 GB of free internal storage. Wi-Fi is recommended.")
+       if(runtimeBusy) {
+        if(runtimeProgress.total > 0) LinearProgressIndicator(progress = { (runtimeProgress.downloaded.toFloat() / runtimeProgress.total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+        else LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        Text(runtimeProgress.message)
+       } else if(!runtimeReady) Button(onClick = { installRuntime() }) { Text("Install build environment") }
+       else Text("Runtime verified and ready.")
+       runtimeError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+      }
+     }
     }
     if(projects.isEmpty())item{Text("No projects yet. Import a folder to create its apb.json configuration.")}
     items(projects,key={it.id}){p->Card(onClick={selected=p},modifier=Modifier.fillMaxWidth(),colors=CardDefaults.cardColors(containerColor=if(selected?.id==p.id)MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant)){Column(Modifier.padding(14.dp)){Text(p.name,style=MaterialTheme.typography.titleMedium);Text(p.type.label,style=MaterialTheme.typography.bodySmall)}}}
@@ -55,11 +77,28 @@ class MainActivity:ComponentActivity(){
      TextButton(onClick={store.delete(p);selected=null;lastApkPath=null;refresh()}){Text("Remove project")}
     }}
     item{Text(status,style=MaterialTheme.typography.titleMedium);if(logs.isNotBlank())Card(Modifier.fillMaxWidth()){Text(logs.takeLast(14000),Modifier.padding(12.dp),style=MaterialTheme.typography.bodySmall)}}
-    item{Text("Runtime storage",style=MaterialTheme.typography.titleMedium);Text("Runtime files are stored outside the APK in /storage/emulated/0/apps/ADB/.t/.h/.i/.s/.i/.s/.p/.r/.i/.v/.a/.t/.e. The compatible toolchain must still be supplied.")}
+    item{Text("Confidential project folder ends at /storage/emulated/0/apps/ADB/.t/.h/.i/.s/.i/.s/.p/.r/.i/.v/.a/.t/.e",style=MaterialTheme.typography.labelSmall)}
    }
   }
   if(showTypeDialog)AlertDialog(onDismissRequest={showTypeDialog=false;pendingUri=null},title={Text("Select project type")},text={Column(verticalArrangement=Arrangement.spacedBy(6.dp)){Text("Choose the format APB should use to configure this folder.");ProjectType.entries.forEach{type->OutlinedButton(modifier=Modifier.fillMaxWidth(),onClick={val uri=pendingUri;showTypeDialog=false;pendingUri=null;if(uri!=null)lifecycleScope.launch{status="Importing as ${type.label}…";runCatching{store.importTree(uri,type)}.onSuccess{selected=it;refresh();status="Imported ${it.name}"}.onFailure{status="Import failed: ${it.message}"}}}){Text(type.label)}}}},confirmButton={TextButton(onClick={showTypeDialog=false;pendingUri=null}){Text("Cancel")}})
  }}
+ }
+ private fun installRuntime() {
+  if(runtimeBusy || runtimeReady) return
+  val installer = RuntimeBootstrap(this)
+  if(installer.isInstalled()) { runtimeReady = true; return }
+  if(filesDir.usableSpace < 1536L * 1024L * 1024L) {
+   runtimeError = "At least 1.5 GB of free internal storage is recommended."
+   return
+  }
+  runtimeBusy = true
+  runtimeError = null
+  lifecycleScope.launch {
+   runCatching { installer.install { progress -> runOnUiThread { runtimeProgress = progress } } }
+    .onSuccess { runtimeReady = installer.isInstalled(); if(!runtimeReady) runtimeError = "Runtime verification did not pass." }
+    .onFailure { runtimeError = it.message ?: "Runtime installation failed." }
+   runtimeBusy = false
+  }
  }
  private fun refresh(){projects=store.listProjects();selected=selected?.let{s->projects.firstOrNull{it.id==s.id}}}
  private fun build(p:ApbProject){lifecycleScope.launch{logs="";status="Building…";store.syncConfig(p);val r=builder.build(p){line->runOnUiThread{logs+=line+"\n"}};lastApkPath=r.output;status=if(r.success)"Build complete" else "Build failed: ${r.message}";logs+="\n"+r.message+(r.output?.let{"\nAPK: $it"}?:"")}}
