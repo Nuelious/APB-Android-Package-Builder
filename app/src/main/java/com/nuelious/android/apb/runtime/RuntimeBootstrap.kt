@@ -12,6 +12,7 @@ import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.nio.file.Paths
 import java.security.MessageDigest
 
@@ -57,10 +58,12 @@ class RuntimeBootstrap(private val context:Context) {
      .put("installed_at",System.currentTimeMillis()).toString())
     val backup=File(root,".runtime-previous")
     backup.deleteRecursively()
-    if(active.exists())check(active.renameTo(backup)){"Could not preserve the previous runtime."}
-    if(!staging.renameTo(active)) {
-     if(backup.exists())backup.renameTo(active)
-     error("Could not activate runtime.")
+    if(active.exists()) Files.move(active.toPath(),backup.toPath(),StandardCopyOption.REPLACE_EXISTING)
+    try {
+     Files.move(staging.toPath(),active.toPath(),StandardCopyOption.ATOMIC_MOVE)
+    } catch(t:Throwable) {
+     if(backup.exists()) Files.move(backup.toPath(),active.toPath(),StandardCopyOption.REPLACE_EXISTING)
+     throw t
     }
     backup.deleteRecursively()
     onProgress(RuntimeProgress("ARM64 runtime installed and verified.",archive.length(),archive.length(),true))
