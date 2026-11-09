@@ -1,15 +1,37 @@
 # Runtime architecture
 
-APB is intended to build from a standalone Android app without Termux or root.
+APB is a standalone Android app and does not require Termux or root.
 
-1. Prefer Android-compatible tools where practical.
-2. Use an isolated Linux userspace only for tools that require it.
-3. Linux userspace does not translate x86_64/glibc binaries into Android ARM64/Bionic binaries. Check ABI, libc, Android API level and device behavior for every component.
-4. Keep toolchains outside the base APK; install verified components individually or from an offline archive.
-5. Put Gradle, APKTool, Smali, signing and alignment behind modular engine interfaces.
+## Runtime modes
+- `apb-native`: run a verified Android-compatible executable directly.
+- `apb-linux`: run Linux ARM64 userspace tools through an Android/ARM64 PRoot executable.
 
-The runtime manager detects ABI/storage, installs and verifies components, reports progress/logs, supports cancellation and tracks licenses. Prefer app-private storage. Never execute binaries supplied by an untrusted project.
+The PRoot runner binds the selected project as `/workspace`, binds APB's installed runtime as `/apb-runtime`, and exposes Android `/dev`, `/proc`, `/sys` and `/system` to the Linux rootfs. Java, Gradle and SDK paths are configured in the Linux process environment.
 
-A PRoot-style environment is not a VM or sandbox escape. Test process execution, filesystem semantics, signals, symlinks and executable permissions on real ARM64 devices.
+## Components
+The example runtime manifest describes separate components:
+- `proot-arm64`: native Android ARM64 PRoot executable.
+- `linux-rootfs-arm64`: ARM64 Linux root filesystem with `/bin` and `/usr`.
+- `jdk17-arm64`: Linux ARM64 JDK compatible with the rootfs.
+- `gradle-8`: Gradle distribution.
+- `android-sdk`: SDK platform/build tools compiled for a compatible host ABI.
+- `apktool`: APKTool JAR.
 
-Acceptance test: run Java and Gradle, resolve dependencies offline, build a minimal APK, verify/sign/align it, and demonstrate logs, cancellation and repeatable builds.
+Install each archive using Runtime Manager and a trusted SHA-256. The example manifest deliberately contains placeholder hashes; it is not a downloadable runtime release.
+
+## Critical compatibility warning
+A Linux userspace does not translate x86_64/glibc binaries into ARM64 binaries. Every native executable must match the phone ABI and its libc expectations. Android SDK host tools are often distributed only for x86_64; an ARM64-compatible SDK/build-tools set must be sourced or built separately. Do not assume the standard desktop SDK archive works on an ARM64 phone.
+
+PRoot is not a virtual machine or a security boundary. Treat imported build scripts as untrusted code and build only projects you trust.
+
+## Validation gate before calling the runtime complete
+On a real ARM64 device:
+1. Verify PRoot starts and mounts the rootfs.
+2. Run Linux ARM64 `java -version` and `gradle --version`.
+3. Install a matching Android SDK platform and build-tools.
+4. Build a minimal Android project online, then offline with dependencies cached.
+5. Build an APKTool project.
+6. Verify APK alignment, signing and signature.
+7. Test process cancellation, log capture, disk-full, low-memory and corrupted archive recovery.
+
+Runtime payloads are not bundled with the source repository. The app-side installer and PRoot command runner are implemented, but a tested distributable toolchain bundle remains a separate deliverable.
