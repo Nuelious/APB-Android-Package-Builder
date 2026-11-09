@@ -6,8 +6,6 @@ on:
       - "feature/private-runtime-storage-file-manager"
     tags:
       - "runtime-v*"
-  pull_request:
-    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 permissions:
@@ -15,7 +13,6 @@ permissions:
 
 jobs:
   runtime:
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
@@ -63,7 +60,7 @@ jobs:
       - name: Package and checksum runtime
         run: |
           set -euxo pipefail
-          tar --hard-dereference -cJf apb-runtime-arm64.tar.xz -C package rootfs jdk gradle apktool.jar
+          tar --hard-dereference -I 'xz -T0 -1' -cf apb-runtime-arm64.tar.xz -C package rootfs jdk gradle apktool.jar
           sha256sum apb-runtime-arm64.tar.xz > apb-runtime-arm64.tar.xz.sha256
       - name: Publish runtime release
         uses: softprops/action-gh-release@v2
