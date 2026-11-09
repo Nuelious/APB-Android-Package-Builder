@@ -53,7 +53,8 @@ class MainActivity:ComponentActivity(){
     LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
      item { Text("Project workspace",style=MaterialTheme.typography.headlineSmall)
       Text("Import Android Studio, APKTool, Smali and DEX project folders.")
-      Row { Button(onClick={picker.launch(null)}){Text("Import folder")};Spacer(Modifier.width(8.dp));OutlinedButton(onClick={startActivity(Intent(this@MainActivity,GitHubImportActivity::class.java))}){Text("Import GitHub")} }\n      OutlinedButton(onClick={refresh()}){Text("Refresh")}
+      Row { Button(onClick={picker.launch(null)}){Text("Import folder")};Spacer(Modifier.width(8.dp));OutlinedButton(onClick={startActivity(Intent(this@MainActivity,GitHubImportActivity::class.java))}){Text("Import GitHub")} }
+      OutlinedButton(onClick={refresh()}){Text("Refresh")}
       OutlinedButton(onClick={startActivity(Intent(this@MainActivity,com.nuelious.android.apb.runtime.RuntimeManagerActivity::class.java))}){Text("Runtime Manager")}
      }
      if(projects.isEmpty()) item { Text("No projects yet. Import a folder to create its apb.json configuration.") }
