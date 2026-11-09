@@ -31,12 +31,12 @@ jobs:
           sudo chroot rootfs apt-get update
           sudo chroot rootfs env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             bash ca-certificates coreutils curl unzip zip xz-utils procps \
-            aapt android-sdk-build-tools android-sdk-platform-tools
+            aapt aidl zipalign android-sdk-platform-tools
           sudo mkdir -p rootfs/opt/android-sdk/platforms rootfs/opt/android-sdk/build-tools/35.0.0
           curl -fL https://dl.google.com/android/repository/platform-35_r02.zip -o platform-35.zip
           unzip -q platform-35.zip -d platform-unpack
           sudo mv platform-unpack/android-35 rootfs/opt/android-sdk/platforms/android-35
-          for tool in aapt aapt2 aidl zipalign apksigner; do
+          for tool in aapt aapt2 aidl zipalign; do
             sudo ln -sf /usr/bin/$tool rootfs/opt/android-sdk/build-tools/35.0.0/$tool
           done
           printf 'Pkg.Revision=35.0.0\n' | sudo tee rootfs/opt/android-sdk/build-tools/35.0.0/source.properties
