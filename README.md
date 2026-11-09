@@ -1,31 +1,45 @@
 # APB — Android Package Builder
 
-**Application ID:** `com.nuelious.android.package.builder.apb`
+**Application ID:** `com.nuelious.android.package.builder.apb`  
+**Repository:** [Nuelious/APB-Android-Package-Builder](https://github.com/Nuelious/APB-Android-Package-Builder)
 
-APB is a standalone Android app for importing and configuring Android source projects, with the goal of building APKs locally without Termux or root.
+APB is a standalone Android application for importing, inspecting, configuring and building Android projects locally. The app itself does not require Termux or root.
 
 ## Implemented in this repository
-- Kotlin + Jetpack Compose Android app shell.
-- Folder selection through Android Storage Access Framework.
-- Project type confirmation: Android Studio/Gradle, Java, Kotlin, APKTool, Smali, DEX and Custom.
-- Folder scanner for Gradle modules, manifests, APKTool files, resources and Smali directories.
-- Private project workspace copy and generated `apb.json`.
-- JSON validation and in-app editor; the JSON remains editable externally.
-- Build coordinator with Gradle and APKTool command dispatch.
-- Runtime manager screen and SHA-256 checked ZIP installer with path traversal protection.
-- Runtime tool detection and status scaffolding.
-- GitHub Actions CI, JSON checks and unit tests.
+- Kotlin + Jetpack Compose Android app.
+- Import local folders through Android Storage Access Framework.
+- Import public GitHub repositories by URL and branch.
+- Choose project type: Android Studio/Gradle, Java, Kotlin, APKTool, Smali, Class2Smali, DEX or Custom.
+- Scan Gradle modules, manifests, APKTool metadata, resources and Smali directories.
+- Copy source into APB's private build workspace.
+- Generate and validate an editable `apb.json`.
+- Write `apb.json` into the original selected folder so a file manager can edit it; APB reloads it before building.
+- In-app JSON editor.
+- Build coordinator for Gradle and APKTool, including complete APKTool/Class2Smali decoded trees.
+- Runtime Manager with SHA-256 verified ZIP installation and zip-slip/extraction-size protection.
+- Optional PRoot-backed Linux ARM64 userspace runner.
+- Export produced APK to a user-selected destination.
+- GitHub Actions CI, JSON validation and unit tests.
 
-## Current limitations — read before testing
-This is a debugging-oriented development build, **not yet a complete universal APK compiler**. Runtime archives are not included. A compatible Android ARM64 Java/Gradle/Android SDK toolchain must be assembled and installed. Gradle projects also need all dependencies cached for offline operation. APKTool requires Java and apktool.jar. Smali/DEX complete APK packaging, SDK provisioning, zipalign, APK signing, build cancellation and robust progress reporting are not yet end-to-end implemented.
+## Build and runtime status
+This is a **debugging-ready development foundation**, not yet a universal APK compiler. The Android app shell and import/configuration flows are implemented. The runtime installer and PRoot runner are implemented, but actual runtime archives are not included.
 
-A Linux userspace does not make desktop x86_64/glibc binaries compatible with Android ARM64/Bionic. Runtime payloads must be built and tested for each supported ABI.
+To build Android Studio projects on-device, install a compatible ARM64 Linux rootfs, Android-compatible PRoot binary, Linux ARM64 JDK, Gradle, Android SDK/build-tools and all project dependencies. Android SDK host tools are often x86_64-only; a compatible ARM64 toolchain must be verified rather than assumed. APKTool needs a compatible Java runtime and apktool.jar.
 
-## Build the APB app
-Open in Android Studio with JDK 17 and Android SDK 35, or run the GitHub Actions workflow. CI uploads a debug APK artifact after a successful build.
+- Gradle runner: implemented; depends on a compatible runtime and SDK.
+- APKTool runner: implemented; depends on Java and apktool.jar.
+- Class2Smali: complete APKTool decoded projects with manifest/resources/apktool.yml can use APKTool. Smali-only/DEX-only folders cannot independently produce a complete APK.
+- APK signing/zipalign for APKTool outputs: not yet end-to-end.
+- Offline mode: possible only after all toolchains and project dependencies are cached.
+- Private GitHub repositories: not supported by the current public ZIP importer.
+
+A Linux userspace does not translate x86_64/glibc binaries into ARM64 binaries. Validate each executable against the target device ABI and libc.
+
+## Build APB
+Open in Android Studio with JDK 17 and Android SDK 35, or run the GitHub Actions workflow. On success, CI uploads an `APB-debug` APK artifact.
 
 ## Configuration
-Each imported project gets an editable `apb.json` at its root. See `schemas/apb-schema-v1.json`, `templates/` and `docs/APB-CONFIGURATION.md`.
+Each imported project gets an editable `apb.json` at its root. It can be edited in APB or externally with a file manager. See `schemas/apb-schema-v1.json`, `templates/` and `docs/APB-CONFIGURATION.md`.
 
 ## Security
-Only build projects you own or are authorized to modify. Imported Gradle scripts are executable code. APB JSON is declarative and does not accept arbitrary shell commands. Runtime archives must come from trusted sources and match their published SHA-256.
+Only build projects you own or are authorized to modify. Imported Gradle scripts are executable code. APB JSON is declarative and never acts as an arbitrary shell script. Install runtime archives only from trusted sources and verify their SHA-256 hashes.
