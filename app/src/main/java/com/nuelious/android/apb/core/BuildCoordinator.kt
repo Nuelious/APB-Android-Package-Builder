@@ -52,10 +52,12 @@ class BuildCoordinator(context:Context) {
    process.inputStream.bufferedReader().useLines{lines->lines.forEach(onLog)}
    val code=process.waitFor();check(code==0){"Build process exited with code $code"}
    val configuredOutput=File(project.root,c.output)
-   val apk=if(c.engine=="gradle")configuredOutput.walkTopDown().firstOrNull{it.isFile&&it.extension.equals("apk",true)}
-    else File(configuredOutput,"apb-unsigned.apk").takeIf{it.isFile}
-      ?:configuredOutput.walkTopDown().firstOrNull{it.isFile&&it.extension.equals("apk",true)}
-    ?:error("Build process succeeded but no APK was found in the configured output directory")
+   val apk=(if(c.engine=="gradle") {
+    configuredOutput.walkTopDown().firstOrNull{it.isFile&&it.extension.equals("apk",true)}
+   } else {
+    File(configuredOutput,"apb-unsigned.apk").takeIf{it.isFile}
+     ?:configuredOutput.walkTopDown().firstOrNull{it.isFile&&it.extension.equals("apk",true)}
+   })?:error("Build process succeeded but no APK was found in the configured output directory")
    val options=c.json.optJSONObject("options")
    val shouldSign=options?.optBoolean("sign_apk",true)?:true
    val shouldAlign=options?.optBoolean("zipalign",true)?:true
