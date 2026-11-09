@@ -1,45 +1,32 @@
 package com.nuelious.android.apb.runtime
 
+import android.content.Context
 import java.io.File
 
-/**
- * Starts a command inside APB's ARM64 Linux userspace using an Android/ARM64
- * PRoot executable. The rootfs and PRoot binary are separately installed,
- * versioned runtime components; neither is bundled into the base APK.
- */
-class LinuxRuntimeExecutor(private val runtime:File, private val project:File) {
- fun start(command:List<String>, onEnvironment:(MutableMap<String,String>)->Unit = {}):Process {
-  val rootfs=File(runtime,"linux-rootfs-arm64")
-  require(File(rootfs,"usr").isDirectory&&File(rootfs,"bin").isDirectory) {
-   "Linux rootfs is missing. Install linux-rootfs-arm64 in Runtime Manager."
-  }
-  val proot=listOf(
-   File(runtime,"proot-arm64/proot"),
-   File(runtime,"proot-arm64/bin/proot"),
-   File(runtime,"proot")
-  ).firstOrNull{it.isFile&&it.canExecute()}
-   ?:error("PRoot executable is missing. Install proot-arm64 in Runtime Manager.")
-
-  val workspace="/workspace"
-  val runtimeMount="/apb-runtime"
+class LinuxRuntimeExecutor(context:Context,private val project:File) {
+ private val nativeDir=File(context.applicationInfo.nativeLibraryDir)
+ private val runtime=File(RuntimeStorage.privateRuntime(context),"active")
+ fun start(command:List<String>):Process {
+  require(File(runtime,"rootfs/usr/bin/env").isFile){"Install the ARM64 build environment first."}
+  val proot=File(nativeDir,"libproot.so")
+  val loader=File(nativeDir,"libproot-loader.so")
+  require(proot.isFile&&proot.canExecute()){"PRoot executable is missing from this APB build."}
+  require(loader.isFile&&loader.canExecute()){"PRoot loader is missing from this APB build."}
   val args=mutableListOf(
-   proot.absolutePath,"-0","-r",rootfs.absolutePath,
+   proot.absolutePath,"-0","-r",File(runtime,"rootfs").absolutePath,
    "-b","/dev","-b","/proc","-b","/sys",
-   "-b","/system:/android-system",
-   "-b","${project.absolutePath}:$workspace",
-   "-b","${runtime.absolutePath}:$runtimeMount",
-   "-w",workspace,
-   "/usr/bin/env",
-   "HOME=/root","TMPDIR=/tmp",
-   "JAVA_HOME=$runtimeMount/jdk17-arm64",
-   "GRADLE_USER_HOME=/root/.gradle",
-   "ANDROID_HOME=$runtimeMount/android-sdk",
-   "ANDROID_SDK_ROOT=$runtimeMount/android-sdk",
-   "PATH=$runtimeMount/jdk17-arm64/bin:$runtimeMount/gradle-8/bin:$runtimeMount/android-sdk/platform-tools:$runtimeMount/android-sdk/build-tools/35.0.0:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+   "-b","${project.absolutePath}:/workspace",
+   "-b","${runtime.absolutePath}:/apb-runtime",
+   "-w","/workspace","/usr/bin/env",
+   "HOME=/root","TMPDIR=/tmp","JAVA_HOME=/apb-runtime/jdk",
+   "GRADLE_USER_HOME=/apb-runtime/gradle-home",
+   "ANDROID_HOME=/opt/android-sdk","ANDROID_SDK_ROOT=/opt/android-sdk",
+   "PATH=/apb-runtime/jdk/bin:/apb-runtime/gradle/bin:/usr/bin:/bin:/usr/sbin:/sbin"
   )
   args.addAll(command)
   val pb=ProcessBuilder(args).directory(project).redirectErrorStream(true)
-  onEnvironment(pb.environment())
+  pb.environment()["PROOT_LOADER"]=loader.absolutePath
+  pb.environment()["PROOT_NO_SECCOMP"]="1"
   return pb.start()
  }
 }
