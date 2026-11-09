@@ -1,0 +1,8 @@
+{
+ "format":"APB","format_version":1,
+ "project":{"name":"AndroidJavaProject","type":"android-java","description":"Android Java project using Gradle"},
+ "source":{"root":".","manifest":"app/src/main/AndroidManifest.xml","modules":["app"]},
+ "runtime":{"environment":"apb-linux","java_version":"17","gradle":"project-wrapper"},
+ "build":{"engine":"gradle","task":"assembleDebug","output":"app/build/outputs/apk/debug","filename":"AndroidJavaProject-debug.apk","offline":false},
+ "options":{"clean_before_build":false,"sign_apk":true,"zipalign":true,"minify":false}
+}

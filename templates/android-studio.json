@@ -1,0 +1,9 @@
+{
+  "format": "APB",
+  "format_version": 1,
+  "project": {"name": "AndroidStudioProject", "type": "android-studio", "description": "Gradle Android project"},
+  "source": {"root": ".", "manifest": "app/src/main/AndroidManifest.xml", "modules": ["app"]},
+  "runtime": {"environment": "apb-native", "java_version": "17", "gradle": "project-wrapper"},
+  "build": {"engine": "gradle", "task": "assembleDebug", "output": "app/build/outputs/apk/debug/", "filename": "AndroidStudioProject-debug.apk", "offline": false},
+  "options": {"clean_before_build": false, "sign_apk": true, "zipalign": true, "minify": false}
+}
