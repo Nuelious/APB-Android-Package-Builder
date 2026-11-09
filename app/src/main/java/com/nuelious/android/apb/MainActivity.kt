@@ -19,6 +19,8 @@ import com.nuelious.android.apb.data.ApbProject
 import com.nuelious.android.apb.data.ProjectType
 import com.nuelious.android.apb.storage.ProjectStore
 import kotlinx.coroutines.launch
+import java.io.File
+import java.io.FileInputStream
 
 @OptIn(ExperimentalMaterial3Api::class)
 class MainActivity:ComponentActivity(){
@@ -28,8 +30,16 @@ class MainActivity:ComponentActivity(){
  private var selected by mutableStateOf<ApbProject?>(null)
  private var status by mutableStateOf("Ready")
  private var logs by mutableStateOf("")
+ private var lastApkPath by mutableStateOf<String?>(null)
  private var pendingUri by mutableStateOf<Uri?>(null)
  private var showTypeDialog by mutableStateOf(false)
+ private val exportPicker by lazy { registerForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.android.package-archive")) { uri ->
+  val path = lastApkPath
+  if (uri != null && path != null) runCatching {
+   contentResolver.openOutputStream(uri)?.use { out -> FileInputStream(File(path)).use { it.copyTo(out) } } ?: error("Cannot open destination")
+   status = "APK exported"
+  }.onFailure { status = "Export failed: ${it.message}" }
+ }}
  private val picker by lazy { registerForActivityResult(ActivityResultContracts.OpenDocumentTree()){uri->
   if(uri!=null){
    contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
@@ -56,7 +66,8 @@ class MainActivity:ComponentActivity(){
       Text("Project configuration: ${p.configFile.absolutePath}",style=MaterialTheme.typography.bodySmall)
       Row { Button(onClick={build(p)}){Text("Build APK")};Spacer(Modifier.width(6.dp))
        OutlinedButton(onClick={startActivity(Intent(this@MainActivity,ConfigEditorActivity::class.java).putExtra(ConfigEditorActivity.EXTRA_PROJECT_ID,p.id))}){Text("Edit apb.json")} }
-      TextButton(onClick={store.delete(p);selected=null;refresh()}){Text("Remove project")}
+      if(lastApkPath!=null) OutlinedButton(onClick={exportPicker.launch(File(lastApkPath!!).name)}){Text("Export APK")}
+      TextButton(onClick={store.delete(p);selected=null;lastApkPath=null;refresh()}){Text("Remove project")}
      }}
      item { Text(status,style=MaterialTheme.typography.titleMedium);if(logs.isNotBlank())Card(Modifier.fillMaxWidth()){Text(logs.takeLast(14000),Modifier.padding(12.dp),style=MaterialTheme.typography.bodySmall)} }
      item { Text("Runtime status",style=MaterialTheme.typography.titleMedium)
@@ -86,6 +97,7 @@ class MainActivity:ComponentActivity(){
  private fun build(p:ApbProject){lifecycleScope.launch{
   logs="";status="Building…"
   store.syncConfig(p)\n  val r=builder.build(p){line->runOnUiThread{logs+=line+"\n"}}
+  lastApkPath=r.output
   status=if(r.success)"Build complete" else "Build failed: ${r.message}"
   logs+="\n"+r.message+(r.output?.let{"\nAPK: $it"}?:"")
  }}
