@@ -15,7 +15,7 @@ APB is a standalone Android application for importing, inspecting, configuring a
 - Generate and validate an editable `apb.json`.
 - Write `apb.json` into the original selected folder so a file manager can edit it; APB reloads it before building.
 - In-app JSON editor.
-- Build coordinator for Gradle and APKTool, including complete APKTool/Class2Smali decoded trees.
+- Build coordinator for Gradle and APKTool, including complete APKTool/Class2Smali decoded trees.\n- APKTool output post-processing with zipalign, debug-key signing and signature verification when the matching Android build-tools are installed.
 - Runtime Manager with SHA-256 verified ZIP installation and zip-slip/extraction-size protection.
 - Optional PRoot-backed Linux ARM64 userspace runner.
 - Export produced APK to a user-selected destination.
