@@ -1,0 +1,8 @@
+{
+ "format":"APB","format_version":1,
+ "project":{"name":"DexProject","type":"dex","description":"DEX-only source; needs manifest, resources and packaging metadata to become an APK"},
+ "source":{"root":".","manifest":null,"modules":[],"smali_directories":[],"resources":null,"apktool_file":null},
+ "runtime":{"environment":"apb-linux","java_version":"17"},
+ "build":{"engine":"dex","output":"dist","filename":null,"offline":true},
+ "options":{"sign_apk":true,"zipalign":true}
+}
