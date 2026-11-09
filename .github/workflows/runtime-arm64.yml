@@ -60,14 +60,14 @@ jobs:
       - name: Package and checksum runtime
         run: |
           set -euxo pipefail
-          tar --hard-dereference -I 'xz -T0 -1' -cf apb-runtime-arm64.tar.xz -C package rootfs jdk gradle apktool.jar
-          sha256sum apb-runtime-arm64.tar.xz > apb-runtime-arm64.tar.xz.sha256
+          tar --hard-dereference -czf apb-runtime-arm64.tar.gz -C package rootfs jdk gradle apktool.jar
+          sha256sum apb-runtime-arm64.tar.gz > apb-runtime-arm64.tar.gz.sha256
       - name: Publish runtime release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('runtime-manual-{0}', github.run_number) }}
           name: APB ARM64 Runtime ${{ github.ref_name }}
           files: |
-            apb-runtime-arm64.tar.xz
-            apb-runtime-arm64.tar.xz.sha256
+            apb-runtime-arm64.tar.gz
+            apb-runtime-arm64.tar.gz.sha256
           generate_release_notes: true

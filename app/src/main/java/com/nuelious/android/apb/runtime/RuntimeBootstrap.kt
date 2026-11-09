@@ -4,7 +4,7 @@ import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
-import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
+import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 import org.json.JSONObject
 import java.io.BufferedInputStream
 import java.io.File
@@ -34,14 +34,14 @@ class RuntimeBootstrap(private val context:Context) {
   for(i in 0 until assets.length()) {
    val a=assets.getJSONObject(i)
    when(a.getString("name")) {
-    "apb-runtime-arm64.tar.xz"->archiveUrl=a.getString("browser_download_url")
-    "apb-runtime-arm64.tar.xz.sha256"->checksumUrl=a.getString("browser_download_url")
+    "apb-runtime-arm64.tar.gz"->archiveUrl=a.getString("browser_download_url")
+    "apb-runtime-arm64.tar.gz.sha256"->checksumUrl=a.getString("browser_download_url")
    }
   }
   val url=archiveUrl?:error("No ARM64 runtime release is published yet. The runtime build must finish first.")
   val expected=readUrl(checksumUrl?:error("Runtime release has no SHA-256 file.")).trim().substringBefore(' ').lowercase()
   require(expected.matches(Regex("[a-f0-9]{64}"))){"Invalid runtime checksum."}
-  val archive=File(context.cacheDir,"apb-runtime-arm64.tar.xz.part")
+  val archive=File(context.cacheDir,"apb-runtime-arm64.tar.gz.part")
   try {
    download(url,archive,onProgress)
    val actual=sha256(archive)
@@ -96,7 +96,7 @@ class RuntimeBootstrap(private val context:Context) {
   return d.digest().joinToString(""){"%02x".format(it)}
  }
  private fun extract(archive:File,destination:File) {
-  TarArchiveInputStream(XZCompressorInputStream(BufferedInputStream(archive.inputStream()))).use{tar->
+  TarArchiveInputStream(GzipCompressorInputStream(BufferedInputStream(archive.inputStream()))).use{tar->
    var count=0
    while(true) {
     val e=tar.nextTarEntry?:break
