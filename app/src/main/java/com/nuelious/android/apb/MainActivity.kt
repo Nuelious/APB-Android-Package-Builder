@@ -33,19 +33,19 @@ class MainActivity:ComponentActivity(){
  private var lastApkPath by mutableStateOf<String?>(null)
  private var pendingUri by mutableStateOf<Uri?>(null)
  private var showTypeDialog by mutableStateOf(false)
- private val exportPicker by lazy { registerForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.android.package-archive")) { uri ->
+ private val exportPicker = registerForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.android.package-archive")) { uri ->
   val path = lastApkPath
   if (uri != null && path != null) runCatching {
    contentResolver.openOutputStream(uri)?.use { out -> FileInputStream(File(path)).use { it.copyTo(out) } } ?: error("Cannot open destination")
    status = "APK exported"
   }.onFailure { status = "Export failed: ${it.message}" }
- }}
- private val picker by lazy { registerForActivityResult(ActivityResultContracts.OpenDocumentTree()){uri->
+ }
+ private val picker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()){uri->
   if(uri!=null){
    contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
    pendingUri=uri;showTypeDialog=true
   }
- }}
+ }
  override fun onCreate(savedInstanceState:Bundle?){super.onCreate(savedInstanceState)
   store=ProjectStore(this);builder=BuildCoordinator(this);refresh()
   setContent { MaterialTheme {
