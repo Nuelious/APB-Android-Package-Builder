@@ -24,7 +24,14 @@ class BuildCoordinator(context:Context) {
       listOf("java","-jar",if(environment=="apb-linux")"/apb-runtime/apktool/apktool.jar" else findTool("apktool.jar").absolutePath,
        "b",if(environment=="apb-linux")"/workspace" else project.root.absolutePath,"-o",output)
     }
-    "smali"->error("Smali assembly alone is not a complete APK build; manifest/resources packaging engine is required")
+    "smali"->{
+      require(File(project.root,"AndroidManifest.xml").isFile&&File(project.root,"apktool.yml").isFile) {
+       "Smali-only/Class2Smali folder needs AndroidManifest.xml, resources and apktool.yml for a complete APK build."
+      }
+      val output=if(environment=="apb-linux")"/workspace/${c.output}/apb-unsigned.apk" else File(project.root,c.output+"/apb-unsigned.apk").absolutePath
+      listOf("java","-jar",if(environment=="apb-linux")"/apb-runtime/apktool/apktool.jar" else findTool("apktool.jar").absolutePath,
+       "b",if(environment=="apb-linux")"/workspace" else project.root.absolutePath,"-o",output)
+    }
     "dex"->error("DEX-only input lacks manifest/resources needed for APK packaging")
     else->error("Custom engine plugins are not installed; arbitrary commands are disabled")
    }
