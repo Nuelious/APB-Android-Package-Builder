@@ -1,0 +1,8 @@
+{
+ "format":"APB","format_version":1,
+ "project":{"name":"CustomProject","type":"custom","description":"Custom project; no arbitrary command execution is enabled"},
+ "source":{"root":"."},
+ "runtime":{"environment":"apb-native"},
+ "build":{"engine":"custom","output":"dist","filename":null,"offline":true},
+ "options":{"sign_apk":false,"zipalign":false}
+}
