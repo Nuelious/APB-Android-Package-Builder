@@ -29,7 +29,7 @@ To build Android Studio projects on-device, install a compatible ARM64 Linux roo
 - Gradle runner: implemented; depends on a compatible runtime and SDK.
 - APKTool runner: implemented; depends on Java and apktool.jar.
 - Class2Smali: complete APKTool decoded projects with manifest/resources/apktool.yml can use APKTool. Smali-only/DEX-only folders cannot independently produce a complete APK.
-- APK signing/zipalign for APKTool outputs: not yet end-to-end.
+- Release-key management, build cancellation and robust progress reporting are not yet end-to-end.
 - Offline mode: possible only after all toolchains and project dependencies are cached.
 - Private GitHub repositories: not supported by the current public ZIP importer.
 
