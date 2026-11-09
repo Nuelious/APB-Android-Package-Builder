@@ -62,7 +62,7 @@ class GitHubImportActivity:ComponentActivity(){
     onDismissRequest={showTypeDialog=false},
     title={Text("Select project type")},
     text={Column(verticalArrangement=Arrangement.spacedBy(6.dp)){
-     ProjectType.entries.forEach{type->OutlinedButton(Modifier.fillMaxWidth(),onClick={
+     ProjectType.entries.forEach{type->OutlinedButton(onClick={
       val uri=destination;showTypeDialog=false
       if(uri!=null)lifecycleScope.launch{
        status="Importing as ${type.label}…"
@@ -70,7 +70,7 @@ class GitHubImportActivity:ComponentActivity(){
         .onSuccess{status="Imported ${it.name}. You can return to APB.";setResult(RESULT_OK);finish()}
         .onFailure{status="Import failed: ${it.message}"}
       }
-     }){Text(type.label)}}
+     },modifier=Modifier.fillMaxWidth()){Text(type.label)}}
     }},
     confirmButton={TextButton(onClick={showTypeDialog=false}){Text("Cancel")}}
    )
