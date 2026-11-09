@@ -1,3 +1,4 @@
+import java.net.URL
 import java.security.MessageDigest
 import java.util.zip.ZipFile
 
@@ -16,7 +17,7 @@ val prepareArm64Proot by tasks.registering {
         val zip = root.resolve("proot-aarch64.zip")
         root.mkdirs()
         val url = "https://github.com/ahmed-alnassif/proot/releases/download/v26.10.08-a179d3e/proot-aarch64.zip"
-        val connection = java.net.URL(url).openConnection()
+        val connection = URL(url).openConnection()
         connection.setRequestProperty("User-Agent", "APB-Android-Package-Builder")
         connection.getInputStream().use { input -> zip.outputStream().use { input.copyTo(it) } }
         val digest = MessageDigest.getInstance("SHA-256").digest(zip.readBytes()).joinToString("") { "%02x".format(it) }
