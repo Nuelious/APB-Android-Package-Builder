@@ -53,6 +53,11 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     sourceSets["main"].jniLibs.srcDir(generatedProot.map { it.dir("jni") })
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
     tasks.named("preBuild").configure { dependsOn(prepareArm64Proot) }
     buildFeatures { compose = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
