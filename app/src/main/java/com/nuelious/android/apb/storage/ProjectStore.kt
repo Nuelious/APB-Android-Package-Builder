@@ -90,5 +90,6 @@ class ProjectStore(private val context:Context) {
    }
   }
  }
-\n fun delete(p:ApbProject){require(p.root.canonicalPath.startsWith(base.canonicalPath+File.separator));p.root.deleteRecursively();prefs.edit().remove("tree:${p.id}").apply()}
+
+ fun delete(p:ApbProject){require(p.root.canonicalPath.startsWith(base.canonicalPath+File.separator));p.root.deleteRecursively();prefs.edit().remove("tree:${p.id}").apply()}
 }
