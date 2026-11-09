@@ -1,0 +1,75 @@
+name: Build and publish APB ARM64 runtime
+
+on:
+  push:
+    tags:
+      - "runtime-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  runtime:
+    # GitHub-hosted ARM64 Linux runner: native debootstrap avoids qemu cross-architecture execution.
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install rootfs tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y debootstrap xz-utils curl unzip ca-certificates
+
+      - name: Create Debian ARM64 root filesystem
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p package
+          sudo debootstrap --arch=arm64 --variant=minbase trixie rootfs http://deb.debian.org/debian
+          sudo chroot rootfs /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get update
+          sudo chroot rootfs /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            bash ca-certificates coreutils curl unzip zip xz-utils procps \
+            aapt apksigner zipalign android-sdk-build-tools
+          sudo chroot rootfs apt-get clean
+          sudo rm -rf rootfs/var/lib/apt/lists/*
+          sudo mkdir -p rootfs/opt/android-sdk/platforms
+          curl -fL https://dl.google.com/android/repository/platform-35_r02.zip -o platform-35.zip
+          unzip -q platform-35.zip -d platform-unpack
+          sudo mv platform-unpack/android-35 rootfs/opt/android-sdk/platforms/android-35
+          sudo rm -rf platform-unpack platform-35.zip
+
+      - name: Install pinned JDK, Gradle and APKTool
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p package/jdk package/gradle package/rootfs
+          curl -fL 'https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.21%2B9/OpenJDK17U-jdk_aarch64_linux_hotspot_17.0.21_9.tar.gz' -o jdk.tar.gz
+          echo '3e4eca7ead088f080af1476007decf010a240a1eb4e1e78c54fa32fbcc347084  jdk.tar.gz' | sha256sum -c -
+          tar -xzf jdk.tar.gz -C package/jdk --strip-components=1
+          curl -fL https://services.gradle.org/distributions/gradle-8.14.4-bin.zip -o gradle.zip
+          echo 'f1771298a70f6db5a29daf62378c4e18a17fc33c9ba6b14362e0cdf40610380d  gradle.zip' | sha256sum -c -
+          unzip -q gradle.zip -d package/gradle-unpack
+          mv package/gradle-unpack/gradle-8.14.4 package/gradle/gradle
+          curl -fL https://bitbucket.org/iBotPeaches/apktool/downloads/apktool_2.11.1.jar -o package/apktool.jar
+          test -s package/apktool.jar
+          sudo cp -a rootfs/. package/rootfs/
+          sudo chown -R "$USER":"$USER" package
+          mkdir -p package/rootfs/usr/local/share/apb
+          printf 'APB runtime build: %s\n' "$GITHUB_SHA" > package/rootfs/usr/local/share/apb/build-info.txt
+
+      - name: Package and checksum runtime
+        run: |
+          set -euxo pipefail
+          tar -cJf apb-runtime-arm64.tar.xz -C package rootfs jdk gradle apktool.jar
+          sha256sum apb-runtime-arm64.tar.xz > apb-runtime-arm64.tar.xz.sha256
+
+      - name: Publish runtime release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'runtime-manual-' }} 
+          name: APB ARM64 Runtime ${{ github.ref_name }}
+          files: |
+            apb-runtime-arm64.tar.xz
+            apb-runtime-arm64.tar.xz.sha256
+          generate_release_notes: true

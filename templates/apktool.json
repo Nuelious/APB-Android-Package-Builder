@@ -1,9 +1,0 @@
-{
-  "format": "APB",
-  "format_version": 1,
-  "project": {"name": "DecodedApkProject", "type": "apktool", "description": "APKTool decoded project for authorized rebuilding"},
-  "source": {"root": ".", "manifest": "AndroidManifest.xml", "smali_directories": ["smali", "smali_classes2"], "resources": "res", "apktool_file": "apktool.yml"},
-  "runtime": {"environment": "apb-native", "java_version": "17"},
-  "build": {"engine": "apktool", "output": "dist/", "filename": "DecodedApkProject-unsigned.apk", "offline": true},
-  "options": {"sign_apk": true, "zipalign": true}
-}

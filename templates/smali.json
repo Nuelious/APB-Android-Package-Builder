@@ -1,9 +1,0 @@
-{
-  "format": "APB",
-  "format_version": 1,
-  "project": {"name": "SmaliProject", "type": "smali", "description": "Smali/Dalvik source project"},
-  "source": {"root": ".", "smali_directories": ["smali", "smali_classes2"], "manifest": "AndroidManifest.xml", "resources": "res"},
-  "runtime": {"environment": "apb-native", "java_version": "17"},
-  "build": {"engine": "smali", "output": "dist/", "filename": "SmaliProject-unsigned.apk", "offline": true},
-  "options": {"sign_apk": true, "zipalign": true}
-}
