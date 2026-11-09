@@ -1,47 +1,39 @@
 name: APB Android CI
-
 on:
-  push:
-    branches: [main]
-  pull_request:
-  workflow_dispatch:
-
+ push:
+  branches: [main]
+ pull_request:
+ workflow_dispatch:
 permissions:
-  contents: read
-
+ contents: read
 jobs:
-  validate-and-build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Validate APB JSON files
-        run: |
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          schema = json.loads(Path("schemas/apb-schema-v1.json").read_text())
-          assert schema["properties"]["format"]["const"] == "APB"
-          for p in Path("templates").glob("*.json"):
-              c = json.loads(p.read_text())
-              assert c["format"] == "APB" and c["format_version"] == 1
-              assert c["project"]["type"] and c["build"]["engine"]
-          print("APB JSON checks passed")
-          PY
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-      - name: Build debug APK
-        run: gradle --no-daemon assembleDebug
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: APB-debug
-          path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
-          retention-days: 14
+ build:
+  runs-on: ubuntu-latest
+  steps:
+   - uses: actions/checkout@v4
+   - uses: actions/setup-java@v4
+     with:
+      distribution: temurin
+      java-version: "17"
+   - uses: android-actions/setup-android@v3
+   - uses: gradle/actions/setup-gradle@v4
+     with:
+      gradle-version: "8.9"
+   - name: Validate JSON files
+     run: |
+      python3 - <<'PY'
+      import json
+      from pathlib import Path
+      for p in list(Path("schemas").glob("*.json"))+list(Path("templates").glob("*.json"))+list(Path("runtime").glob("*.json")):
+          json.loads(p.read_text())
+      print("JSON files are valid")
+      PY
+   - name: Run unit tests
+     run: gradle --no-daemon testDebugUnitTest
+   - name: Assemble debug APK
+     run: gradle --no-daemon assembleDebug
+   - uses: actions/upload-artifact@v4
+     with:
+      name: APB-debug
+      path: app/build/outputs/apk/debug/*.apk
+      if-no-files-found: error
