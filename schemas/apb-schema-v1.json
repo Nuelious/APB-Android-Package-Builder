@@ -12,7 +12,7 @@
       "required": ["name", "type"],
       "properties": {
         "name": {"type": "string", "minLength": 1},
-        "type": {"enum": ["android-studio", "android-java", "android-kotlin", "apktool", "smali", "dex", "custom"]},
+        "type": {"enum": ["android-studio", "android-java", "android-kotlin", "apktool", "smali", "class2smali", "dex", "custom"]},
         "description": {"type": "string"}
       }
     },
