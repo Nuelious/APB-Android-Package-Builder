@@ -52,7 +52,12 @@ class BuildCoordinator(context:Context) {
    process.inputStream.bufferedReader().useLines{lines->lines.forEach(onLog)}
    val code=process.waitFor();check(code==0){"Build process exited with code $code"}
    val apk=project.root.walkTopDown().firstOrNull{it.isFile&&it.extension.equals("apk",true)}
-   BuildResult(true,"Build command completed",apk?.absolutePath)
+    ?:error("Build process succeeded but no APK was found in the project output")
+   val options=c.json.optJSONObject("options")
+   val shouldSign=options?.optBoolean("sign_apk",true)?:true
+   val shouldAlign=options?.optBoolean("zipalign",true)?:true
+   val finalApk=if(c.engine=="gradle")apk else ApkPostProcessor(runtime,project.root,environment=="apb-linux",onLog).process(apk,shouldAlign,shouldSign)
+   BuildResult(true,"Build completed and output processed",finalApk.absolutePath)
   }.getOrElse{BuildResult(false,it.message?:"Build failed")}
  }
 
