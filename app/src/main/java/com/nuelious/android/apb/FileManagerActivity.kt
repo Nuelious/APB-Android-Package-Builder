@@ -495,7 +495,7 @@ private object FileTransfer {
                     val entry = entries.nextElement()
                     count++
                     require(count <= 200_000) { "ZIP contains too many entries." }
-                    val name = entry.name.replace('\\\\', '/')
+                    val name = entry.name.replace('\\', '/')
                     require(name.isNotBlank() && !name.startsWith("/") && !Regex("^[A-Za-z]:").containsMatchIn(name)) { "Unsafe ZIP path: ${entry.name}" }
                     val output = File(staging, name).canonicalFile
                     require(output.path.startsWith(staging.canonicalPath + File.separator)) { "ZIP path traversal blocked: ${entry.name}" }
