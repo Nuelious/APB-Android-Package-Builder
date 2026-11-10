@@ -9,6 +9,8 @@ def add_tree(zf, root: Path):
         st = path.lstat()
         info = zipfile.ZipInfo(rel + ("/" if stat.S_ISDIR(st.st_mode) else ""))
         info.create_system = 3
+        info.compress_type = zipfile.ZIP_DEFLATED
+        info._compresslevel = 6
         info.external_attr = (st.st_mode & 0xFFFF) << 16
         if stat.S_ISLNK(st.st_mode):
             zf.writestr(info, os.readlink(path).encode())

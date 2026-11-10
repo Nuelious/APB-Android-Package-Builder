@@ -2,6 +2,8 @@ name: Build and publish APB ARM64 runtime
 
 on:
   push:
+    branches:
+      - "feature/private-runtime-storage-file-manager"
     tags:
       - "runtime-v*"
   workflow_dispatch:
