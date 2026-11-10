@@ -11,6 +11,10 @@ import kotlinx.coroutines.withContext
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
+import androidx.compose.ui.window.Dialog
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -106,6 +110,29 @@ class MainActivity:ComponentActivity(){
     item{Text("Confidential project folder ends at /storage/emulated/0/apps/ADB/.t/.h/.i/.s/.i/.s/.p/.r/.i/.v/.a/.t/.e",style=MaterialTheme.typography.labelSmall)}
    }
   }
+  BackHandler(enabled = buildBusy) { /* Build progress is intentionally non-dismissible. */ }
+  if(buildBusy) Dialog(onDismissRequest = {}, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+   Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+    val scroll = rememberScrollState()
+    LaunchedEffect(logs) { scroll.animateScrollTo(scroll.maxValue) }
+    Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+      Text("Building project", style = MaterialTheme.typography.headlineSmall)
+      Text("%02d:%02d".format(buildElapsedSeconds/60, buildElapsedSeconds%60), style = MaterialTheme.typography.titleMedium)
+     }
+     LinearProgressIndicator(Modifier.fillMaxWidth())
+     Text(buildPhase, style = MaterialTheme.typography.titleMedium)
+     val silentFor = ((System.currentTimeMillis()-lastBuildOutputAt).coerceAtLeast(0L)/1000L)
+     Text(if(silentFor < 10) "Build output is updating…" else "Gradle has produced no new output for $silentFor seconds. The build remains active; some compilation steps are quiet.", style = MaterialTheme.typography.bodySmall)
+     Text(status, style = MaterialTheme.typography.bodyMedium)
+     Text("Live compiler / Gradle output", style = MaterialTheme.typography.titleSmall)
+     Surface(Modifier.weight(1f).fillMaxWidth(), color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.medium) {
+      Text(if(logs.isBlank()) "Starting build process…" else logs.takeLast(50000), Modifier.fillMaxSize().verticalScroll(scroll).padding(12.dp), style = MaterialTheme.typography.bodySmall)
+     }
+     Text("Keep APB open while compilation runs. This screen closes automatically when the build finishes.", style = MaterialTheme.typography.bodySmall)
+    }
+   }
+  }
   if(runtimeDetails) AlertDialog(
    onDismissRequest = { runtimeDetails = false },
    title = { Text("Runtime installation details") },
@@ -158,6 +185,7 @@ class MainActivity:ComponentActivity(){
  private fun build(p:ApbProject) {
   if(buildBusy) return
   buildBusy=true
+  window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
   buildStartedAt=System.currentTimeMillis()
   lastBuildOutputAt=buildStartedAt
   buildElapsedSeconds=0
@@ -187,6 +215,7 @@ class MainActivity:ComponentActivity(){
    status=if(result.success) "Build complete" else "Build failed: "+result.message
    logs=(logs+"\n"+result.message+(result.output?.let{"\nAPK: "+it}?:"")).takeLast(30000)
    buildBusy=false
+   window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
   }
  }
  override fun onResume(){super.onResume();if(::store.isInitialized)refresh()}
