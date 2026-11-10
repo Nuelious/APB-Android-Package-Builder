@@ -152,17 +152,32 @@ class RuntimeBootstrap(private val context: Context) {
                             .trimEnd('\n', '\r')
                         require(target.isNotBlank() && !target.contains('\u0000')) { "Invalid symlink target in ${entry.name}." }
                         val targetPath = Paths.get(target)
-                        require(!targetPath.isAbsolute) { "Absolute symlink target is not allowed: ${entry.name} -> $target" }
                         output.parentFile?.mkdirs()
-                        // Use canonical paths for BOTH sides. Android commonly exposes
-                        // app-private storage through /data/data and /data/user/0 aliases;
-                        // comparing one canonical path with one absolute-but-noncanonical path
-                        // falsely classifies valid in-root links as escapes.
+                        // Absolute links in a Linux rootfs are interpreted inside that
+                        // rootfs (the runtime executes in its own root namespace), not as
+                        // Android host paths. Translate them to a rootfs-relative location
+                        // only for validation; preserve the original absolute link text.
                         val runtimeRoot = destination.canonicalFile.toPath().normalize()
-                        val linkParent = output.parentFile.canonicalFile.toPath().normalize()
-                        val resolved = linkParent.resolve(targetPath).normalize()
+                        val rootFsRoot = File(destination, "rootfs").canonicalFile.toPath().normalize()
+                        val resolved = if (targetPath.isAbsolute) {
+                            require(entry.name.replace('\\', '/').startsWith("rootfs/")) {
+                                "Absolute symlink target is only valid inside rootfs: ${entry.name} -> $target"
+                            }
+                            rootFsRoot.resolve(targetPath.toString().trimStart('/')).normalize().also {
+                                require(it.startsWith(rootFsRoot)) {
+                                    "Rootfs symlink escapes rootfs: ${entry.name} -> $target"
+                                }
+                            }
+                        } else {
+                            val linkParent = output.parentFile.canonicalFile.toPath().normalize()
+                            linkParent.resolve(targetPath).normalize().also {
+                                require(it.startsWith(runtimeRoot)) {
+                                    "Symlink escapes runtime root: ${entry.name} -> $target"
+                                }
+                            }
+                        }
                         require(resolved.startsWith(runtimeRoot)) {
-                            "Symlink escapes runtime root: ${entry.name} -> $target (resolves to $resolved; root $runtimeRoot)"
+                            "Symlink escapes runtime root: ${entry.name} -> $target (resolves to $resolved)"
                         }
                         Files.createSymbolicLink(output.toPath(), targetPath)
                     }
