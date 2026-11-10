@@ -22,6 +22,7 @@ import com.nuelious.android.apb.data.ApbProject
 import com.nuelious.android.apb.data.ProjectType
 import com.nuelious.android.apb.storage.ProjectStore
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import java.io.File
 import java.io.FileInputStream
 
@@ -33,6 +34,11 @@ class MainActivity:ComponentActivity(){
  private var selected by mutableStateOf<ApbProject?>(null)
  private var status by mutableStateOf("Ready")
  private var logs by mutableStateOf("")
+ private var buildBusy by mutableStateOf(false)
+ private var buildStartedAt by mutableLongStateOf(0L)
+ private var buildElapsedSeconds by mutableIntStateOf(0)
+ private var lastBuildOutputAt by mutableLongStateOf(0L)
+ private var buildPhase by mutableStateOf("Preparing build…")
  private var lastApkPath by mutableStateOf<String?>(null)
  private var runtimeReady by mutableStateOf(false)
  private var runtimeBusy by mutableStateOf(false)
@@ -75,11 +81,28 @@ class MainActivity:ComponentActivity(){
     if(projects.isEmpty())item{Text("No projects yet. Import a folder to create its apb.json configuration.")}
     items(projects,key={it.id}){p->Card(onClick={selected=p},modifier=Modifier.fillMaxWidth(),colors=CardDefaults.cardColors(containerColor=if(selected?.id==p.id)MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant)){Column(Modifier.padding(14.dp)){Text(p.name,style=MaterialTheme.typography.titleMedium);Text(p.type.label,style=MaterialTheme.typography.bodySmall)}}}
     selected?.let{p->item{Text("Selected: ${p.name}",style=MaterialTheme.typography.titleLarge);Text("Project configuration: ${p.configFile.absolutePath}",style=MaterialTheme.typography.bodySmall)
-     Row{Button(onClick={build(p)}){Text("Build APK")};Spacer(Modifier.width(6.dp));OutlinedButton(onClick={startActivity(Intent(this@MainActivity,ConfigEditorActivity::class.java).putExtra(ConfigEditorActivity.EXTRA_PROJECT_ID,p.id))}){Text("Edit apb.json")}}
+     Row{Button(enabled=!buildBusy,onClick={build(p)}){Text(if(buildBusy) "Building…" else "Build APK")};Spacer(Modifier.width(6.dp));OutlinedButton(enabled=!buildBusy,onClick={startActivity(Intent(this@MainActivity,ConfigEditorActivity::class.java).putExtra(ConfigEditorActivity.EXTRA_PROJECT_ID,p.id))}){Text("Edit apb.json")}}
      if(lastApkPath!=null)OutlinedButton(onClick={exportPicker.launch(File(lastApkPath!!).name)}){Text("Export APK")}
      TextButton(onClick={store.delete(p);selected=null;lastApkPath=null;refresh()}){Text("Remove project")}
     }}
-    item{Text(status,style=MaterialTheme.typography.titleMedium);if(logs.isNotBlank())Card(Modifier.fillMaxWidth()){Text(logs.takeLast(14000),Modifier.padding(12.dp),style=MaterialTheme.typography.bodySmall)}}
+    item {
+     if(buildBusy || logs.isNotBlank()) Card(Modifier.fillMaxWidth()) {
+      Column(Modifier.padding(12.dp), verticalArrangement=Arrangement.spacedBy(8.dp)) {
+       Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.SpaceBetween) {
+        Text(if(buildBusy) "Build running" else "Build output", style=MaterialTheme.typography.titleMedium)
+        if(buildBusy) Text("%02d:%02d".format(buildElapsedSeconds/60, buildElapsedSeconds%60), style=MaterialTheme.typography.labelLarge)
+       }
+       if(buildBusy) {
+        LinearProgressIndicator(modifier=Modifier.fillMaxWidth())
+        Text(buildPhase, style=MaterialTheme.typography.bodyMedium)
+        val silentFor = ((System.currentTimeMillis()-lastBuildOutputAt).coerceAtLeast(0L)/1000L)
+        Text(if(silentFor < 10) "Receiving build output…" else "No new output for $silentFor seconds. Gradle may still be working; this does not mean the build has stopped.", style=MaterialTheme.typography.bodySmall)
+       }
+       Text(status, style=MaterialTheme.typography.bodyMedium)
+       if(logs.isNotBlank()) Text(logs.takeLast(14000), style=MaterialTheme.typography.bodySmall)
+      }
+     }
+    }
     item{Text("Confidential project folder ends at /storage/emulated/0/apps/ADB/.t/.h/.i/.s/.i/.s/.p/.r/.i/.v/.a/.t/.e",style=MaterialTheme.typography.labelSmall)}
    }
   }
@@ -132,6 +155,39 @@ class MainActivity:ComponentActivity(){
   }
  }
  private fun refresh(){projects=store.listProjects();selected=selected?.let{s->projects.firstOrNull{it.id==s.id}}}
- private fun build(p:ApbProject){lifecycleScope.launch{logs="";status="Building…";store.syncConfig(p);val r=builder.build(p){line->runOnUiThread{logs+=line+"\n"}};lastApkPath=r.output;status=if(r.success)"Build complete" else "Build failed: ${r.message}";logs+="\n"+r.message+(r.output?.let{"\nAPK: $it"}?:"")}}
+ private fun build(p:ApbProject) {
+  if(buildBusy) return
+  buildBusy=true
+  buildStartedAt=System.currentTimeMillis()
+  lastBuildOutputAt=buildStartedAt
+  buildElapsedSeconds=0
+  buildPhase="Starting PRoot and Gradle…"
+  logs=""
+  status="Building…"
+  lifecycleScope.launch {
+   val timer=launch {
+    while(buildBusy) {
+     buildElapsedSeconds=((System.currentTimeMillis()-buildStartedAt)/1000L).toInt()
+     delay(1000)
+    }
+   }
+   val result=runCatching {
+    store.syncConfig(p)
+    builder.build(p) { line ->
+     runOnUiThread {
+      logs=(logs+line+"\n").takeLast(30000)
+      lastBuildOutputAt=System.currentTimeMillis()
+      val clean=line.trim()
+      if(clean.isNotEmpty()) buildPhase=clean.take(150)
+     }
+    }
+   }.getOrElse { com.nuelious.android.apb.core.BuildResult(false,it.message ?: "Build failed.") }
+   timer.cancel()
+   lastApkPath=result.output
+   status=if(result.success) "Build complete" else "Build failed: "+result.message
+   logs=(logs+"\n"+result.message+(result.output?.let{"\nAPK: "+it}?:"")).takeLast(30000)
+   buildBusy=false
+  }
+ }
  override fun onResume(){super.onResume();if(::store.isInitialized)refresh()}
 }
