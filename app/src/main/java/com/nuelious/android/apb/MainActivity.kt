@@ -2,6 +2,8 @@ package com.nuelious.android.apb
 
 import android.os.Bundle
 import android.content.Intent
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -38,6 +40,7 @@ class MainActivity:ComponentActivity(){
  private var selected by mutableStateOf<ApbProject?>(null)
  private var status by mutableStateOf("Ready")
  private var logs by mutableStateOf("")
+ private var fullLogFile: File? = null
  private var buildBusy by mutableStateOf(false)
  private var buildStartedAt by mutableLongStateOf(0L)
  private var buildElapsedSeconds by mutableIntStateOf(0)
@@ -52,6 +55,16 @@ class MainActivity:ComponentActivity(){
  private var runtimeDetails by mutableStateOf(false)
  private val runtimeZipPicker=registerForActivityResult(ActivityResultContracts.OpenDocument()){ uri -> if(uri!=null) installSelectedRuntime(uri) }
  private var showTypeDialog by mutableStateOf(false)
+ private val logExportPicker=registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")){uri->
+  if(uri!=null) runCatching {
+   val source=fullLogFile
+   contentResolver.openOutputStream(uri)?.use { output ->
+    if(source?.isFile==true) source.inputStream().use { it.copyTo(output) }
+    else output.write(logs.toByteArray(Charsets.UTF_8))
+   } ?: error("Cannot open the selected destination.")
+   status="Build log saved."
+  }.onFailure { status="Log export failed: ${it.message}" }
+ }
  private val exportPicker=registerForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.android.package-archive")){uri->
   val path=lastApkPath
   if(uri!=null&&path!=null)runCatching{contentResolver.openOutputStream(uri)?.use{out->FileInputStream(File(path)).use{it.copyTo(out)}}?:error("Cannot open destination");status="APK exported"}.onFailure{status="Export failed: ${it.message}"}
@@ -125,6 +138,20 @@ class MainActivity:ComponentActivity(){
      val silentFor = ((System.currentTimeMillis()-lastBuildOutputAt).coerceAtLeast(0L)/1000L)
      Text(if(silentFor < 10) "Build output is updating…" else "Gradle has produced no new output for $silentFor seconds. The build remains active; some compilation steps are quiet.", style = MaterialTheme.typography.bodySmall)
      Text(status, style = MaterialTheme.typography.bodyMedium)
+     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+      OutlinedButton(onClick = { logExportPicker.launch("APB-build-log.txt") }) { Text("Save logs") }
+      OutlinedButton(onClick = {
+       val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+       val text = fullLogFile?.takeIf { it.isFile }?.readText() ?: logs
+       clipboard.setPrimaryClip(ClipData.newPlainText("APB build log", text))
+       status = "Build log copied to clipboard."
+      }) { Text("Copy logs") }
+      OutlinedButton(onClick = {
+       val text = fullLogFile?.takeIf { it.isFile }?.readText() ?: logs
+       val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_SUBJECT, "APB build log").putExtra(Intent.EXTRA_TEXT, text)
+       startActivity(Intent.createChooser(send, "Share build log"))
+      }) { Text("Share") }
+     }
      Text("Live compiler / Gradle output", style = MaterialTheme.typography.titleSmall)
      Surface(Modifier.weight(1f).fillMaxWidth(), color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.medium) {
       Text(if(logs.isBlank()) "Starting build process…" else logs.takeLast(50000), Modifier.fillMaxSize().verticalScroll(scroll).padding(12.dp), style = MaterialTheme.typography.bodySmall)
@@ -191,6 +218,7 @@ class MainActivity:ComponentActivity(){
   buildElapsedSeconds=0
   buildPhase="Starting PRoot and Gradle…"
   logs=""
+  fullLogFile=File(cacheDir,"apb-build-${System.currentTimeMillis()}.log").also { it.parentFile?.mkdirs(); it.writeText("APB build started\\n") }
   status="Building…"
   lifecycleScope.launch {
    val timer=launch {
