@@ -38,6 +38,8 @@ class MainActivity:ComponentActivity(){
  private var runtimeProgress by mutableStateOf(RuntimeProgress("Runtime not installed"))
  private var runtimeError by mutableStateOf<String?>(null)
  private var pendingUri by mutableStateOf<Uri?>(null)
+ private var runtimeDetails by mutableStateOf(false)
+ private val runtimeZipPicker=registerForActivityResult(ActivityResultContracts.OpenDocument()){ uri -> if(uri!=null) installSelectedRuntime(uri) }
  private var showTypeDialog by mutableStateOf(false)
  private val exportPicker=registerForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.android.package-archive")){uri->
   val path=lastApkPath
@@ -63,7 +65,7 @@ class MainActivity:ComponentActivity(){
         if(runtimeProgress.total > 0) LinearProgressIndicator(progress = { (runtimeProgress.downloaded.toFloat() / runtimeProgress.total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
         else LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         Text(runtimeProgress.message)
-       } else if(!runtimeReady) Button(onClick = { installRuntime(force = false) }) { Text("Install build environment") }
+       } else if(!runtimeReady) { Button(onClick = { installRuntime(force = false) }) { Text("Install build environment") }; OutlinedButton(onClick = { runtimeZipPicker.launch(arrayOf("application/zip", "application/octet-stream", "application/x-zip-compressed")) }) { Text("Choose runtime ZIP…") } }
        else {
         Text("Runtime verified and ready.")
         OutlinedButton(onClick = { installRuntime(force = true) }) { Text("Reinstall build environment") }
@@ -101,6 +103,21 @@ class MainActivity:ComponentActivity(){
     .onSuccess { runtimeReady = installer.isInstalled(); if(!runtimeReady) runtimeError = "Runtime verification did not pass." }
     .onFailure { runtimeError = it.message ?: "Runtime installation failed." }
    runtimeBusy = false
+  }
+ }
+ private fun installSelectedRuntime(uri: Uri) {
+  if(runtimeBusy) return
+  runtimeBusy=true; runtimeError=null; runtimeDetails=true
+  lifecycleScope.launch {
+   val archive=File(cacheDir,"apb-selected-runtime-${System.nanoTime()}.zip")
+   runCatching {
+    withContext(kotlinx.coroutines.Dispatchers.IO) {
+     contentResolver.openInputStream(uri)?.use { input -> archive.outputStream().use { output -> input.copyTo(output) } } ?: error("Cannot read the selected ZIP.")
+    }
+    RuntimeBootstrap(this@MainActivity).installArchive(archive) { progress -> runOnUiThread { runtimeProgress=progress } }
+   }.onSuccess { runtimeReady=RuntimeBootstrap(this@MainActivity).isInstalled(); status="Selected runtime installed and verified." }
+    .onFailure { runtimeError=it.message ?: "Selected runtime installation failed." }
+   archive.delete(); runtimeBusy=false
   }
  }
  private fun refresh(){projects=store.listProjects();selected=selected?.let{s->projects.firstOrNull{it.id==s.id}}}

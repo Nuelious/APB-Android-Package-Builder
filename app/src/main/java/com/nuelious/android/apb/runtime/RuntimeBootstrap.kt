@@ -93,7 +93,34 @@ class RuntimeBootstrap(private val context: Context) {
         }
     }
 
-    private fun extractZip(archive: File, destination: File) {
+    suspend fun installArchive(archive: File, onProgress: (RuntimeProgress) -> Unit) = withContext(Dispatchers.IO) {
+        require(archive.isFile && archive.extension.equals("zip", true)) { "Select a ZIP runtime archive." }
+        check(android.os.Build.SUPPORTED_ABIS.any { it == "arm64-v8a" }) { "The APB runtime requires a 64-bit ARM Android device." }
+        val staging = File(root, ".runtime-selected-staging")
+        staging.deleteRecursively()
+        check(staging.mkdirs()) { "Cannot create runtime staging directory." }
+        try {
+            onProgress(RuntimeProgress("Inspecting selected runtime ZIP…"))
+            extractZip(archive, staging) { file, done, total ->
+                val percent = if (total > 0) ((done * 100) / total).toInt().coerceIn(0, 99) else 0
+                onProgress(RuntimeProgress("Extracting selected runtime…", done, total, false, percent, file, "Current file: $file\\nExpanded: $done bytes"))
+            }
+            listOf("rootfs/usr/bin/env", "jdk/bin/java", "gradle/bin/gradle", "apktool.jar").forEach {
+                check(File(staging, it).isFile) { "Selected ZIP is not a complete APB runtime. Missing $it" }
+            }
+            val digest = sha256(archive)
+            File(staging, "runtime-ready.json").writeText(JSONObject().put("release", "user-selected").put("sha256", digest).put("installed_at", System.currentTimeMillis()).toString())
+            val backup = File(root, ".runtime-previous")
+            backup.deleteRecursively()
+            if (active.exists()) Files.move(active.toPath(), backup.toPath())
+            try { Files.move(staging.toPath(), active.toPath()) }
+            catch (failure: Throwable) { if (backup.exists()) Files.move(backup.toPath(), active.toPath()); throw failure }
+            backup.deleteRecursively()
+            onProgress(RuntimeProgress("Selected runtime installed and verified.", archive.length(), archive.length(), true, 100, "", "SHA-256: $digest"))
+        } catch (failure: Throwable) { staging.deleteRecursively(); throw failure }
+    }
+
+    private fun extractZip(archive: File, destination: File, onProgress: ((String, Long, Long) -> Unit)? = null) {
         ZipFile.builder().setFile(archive).get().use { zip ->
             val entries = zip.entries
             var count = 0
