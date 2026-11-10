@@ -144,12 +144,23 @@ class RuntimeBootstrap(private val context: Context) {
                 when {
                     entry.isDirectory -> check(output.mkdirs() || output.isDirectory)
                     entry.isUnixSymlink -> {
+                        // ZIP symlinks are interpreted relative to the link's parent, never
+                        // relative to the process working directory. Normalize both sides to
+                        // absolute paths before checking containment (Path.startsWith is
+                        // component-aware, unlike a string-prefix check).
                         val target = zip.getInputStream(entry).bufferedReader().use { it.readText() }
-                        require(target.isNotBlank() && !target.contains('\u0000')) { "Invalid symlink target." }
+                            .trimEnd('\n', '\r')
+                        require(target.isNotBlank() && !target.contains('\u0000')) { "Invalid symlink target in ${entry.name}." }
+                        val targetPath = Paths.get(target)
+                        require(!targetPath.isAbsolute) { "Absolute symlink target is not allowed: ${entry.name} -> $target" }
                         output.parentFile?.mkdirs()
-                        val resolved = output.parentFile.toPath().resolve(target).normalize()
-                        require(resolved.startsWith(destination.toPath().normalize())) { "Symlink escapes runtime root: ${entry.name}" }
-                        Files.createSymbolicLink(output.toPath(), Paths.get(target))
+                        val runtimeRoot = destination.toPath().toAbsolutePath().normalize()
+                        val linkParent = output.parentFile.toPath().toAbsolutePath().normalize()
+                        val resolved = linkParent.resolve(targetPath).normalize()
+                        require(resolved.startsWith(runtimeRoot)) {
+                            "Symlink escapes runtime root: ${entry.name} -> $target (resolves to $resolved)"
+                        }
+                        Files.createSymbolicLink(output.toPath(), targetPath)
                     }
                     mode and 0xF000 == 0x8000 || mode == 0 -> {
                         output.parentFile?.mkdirs()
