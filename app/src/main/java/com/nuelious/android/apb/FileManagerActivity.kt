@@ -26,6 +26,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.apache.commons.compress.archivers.zip.ZipFile
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -114,6 +115,7 @@ private fun FileManagerScreen(
     var actionMenu by remember { mutableStateOf(false) }
     var dialog by remember { mutableStateOf("") }
     var inputName by remember { mutableStateOf("") }
+    var extractArchive by remember { mutableStateOf<File?>(null) }
     var propertyFile by remember { mutableStateOf<File?>(null) }
     var replaceTarget by remember { mutableStateOf<File?>(null) }
     var pendingPaste by remember { mutableStateOf<List<File>>(emptyList()) }
@@ -273,6 +275,7 @@ private fun FileManagerScreen(
                             TextButton(onClick = { copyToClipboard(true) }) { Text("Cut") }
                             TextButton(onClick = { dialog = "rename"; inputName = selected.singleOrNull()?.name.orEmpty() }, enabled = selected.size == 1 && !protected(selected.first())) { Text("Rename") }
                             TextButton(onClick = { propertyFile = selected.singleOrNull() }, enabled = selected.size == 1) { Text("Properties") }
+                            TextButton(onClick = { selected.singleOrNull()?.let { archive -> extractArchive = archive; inputName = archive.name.removeSuffix(".zip").ifBlank { "extracted" }; dialog = "extract" } }, enabled = selected.size == 1 && selected.singleOrNull()?.extension.equals("zip", true) && !busy && !currentReadOnly) { Text("Extract") }
                             TextButton(onClick = { dialog = "delete" }, enabled = selected.none { protected(it) }) { Text("Delete") }
                         }
                     }
@@ -372,9 +375,10 @@ private fun FileManagerScreen(
     if (dialog.isNotBlank()) {
         AlertDialog(
             onDismissRequest = { dialog = "" },
-            title = { Text(when (dialog) { "folder" -> "Create folder"; "file" -> "Create file"; "rename" -> "Rename item"; else -> "Delete selected items?" }) },
+            title = { Text(when (dialog) { "folder" -> "Create folder"; "file" -> "Create file"; "rename" -> "Rename item"; "extract" -> "Extract ZIP"; else -> "Delete selected items?" }) },
             text = {
                 if (dialog == "delete") Text("Permanently delete ${selected.size} selected item(s)? This cannot be undone.")
+                else if (dialog == "extract") Column { Text("Extract ${extractArchive?.name ?: "archive"} into a new folder in the current directory.") ; OutlinedTextField(value = inputName, onValueChange = { inputName = it }, label = { Text("Destination folder") }, singleLine = true) }
                 else OutlinedTextField(
                     value = inputName,
                     onValueChange = { inputName = it },
@@ -407,6 +411,22 @@ private fun FileManagerScreen(
                                 selected.clear()
                                 "Renamed to $newName"
                             }
+                        }
+                        "extract" -> {
+                            val archive = extractArchive
+                            val folderName = inputName.trim()
+                            if (archive == null) status = "Select a ZIP archive."
+                            else perform("Extracting ${archive.name}…") {
+                                FileTransfer.validateName(folderName)
+                                check(!protected(archive)) { "APB runtime files cannot be extracted from the file manager." }
+                                val destination = File(current, folderName)
+                                check(within(base, destination) && !protected(destination)) { "Invalid or protected extraction destination." }
+                                check(!destination.exists()) { "Destination already exists: $folderName" }
+                                FileTransfer.extractZipSafely(archive, destination)
+                                selected.clear()
+                                "Extracted ${archive.name} to $folderName."
+                            }
+                            extractArchive = null
                         }
                         "folder", "file" -> {
                             val newName = inputName.trim()
@@ -459,6 +479,58 @@ private fun FileManagerScreen(
 }
 
 private object FileTransfer {
+    /** Extracts an ordinary ZIP into a sibling staging folder, rejecting traversal, symlinks and special files. */
+    fun extractZipSafely(archive: File, destination: File) {
+        require(archive.isFile && archive.extension.equals("zip", true)) { "Select a valid ZIP archive." }
+        val parent = destination.parentFile ?: error("Invalid extraction destination.")
+        check(parent.isDirectory || parent.mkdirs()) { "Cannot access destination folder." }
+        val staging = File(parent, ".apb-extract-${System.nanoTime()}")
+        check(staging.mkdirs()) { "Cannot create extraction staging folder." }
+        var expanded = 0L
+        var count = 0
+        try {
+            ZipFile.builder().setFile(archive).get().use { zip ->
+                val entries = zip.entries
+                while (entries.hasMoreElements()) {
+                    val entry = entries.nextElement()
+                    count++
+                    require(count <= 200_000) { "ZIP contains too many entries." }
+                    val name = entry.name.replace('\\\\', '/')
+                    require(name.isNotBlank() && !name.startsWith("/") && !Regex("^[A-Za-z]:").containsMatchIn(name)) { "Unsafe ZIP path: ${entry.name}" }
+                    val output = File(staging, name).canonicalFile
+                    require(output.path.startsWith(staging.canonicalPath + File.separator)) { "ZIP path traversal blocked: ${entry.name}" }
+                    val mode = entry.unixMode
+                    require(!entry.isUnixSymlink && (mode == 0 || mode and 0xF000 == 0x8000 || entry.isDirectory)) {
+                        "ZIP contains a symbolic link or unsupported special file: ${entry.name}"
+                    }
+                    if (entry.isDirectory) {
+                        check(output.mkdirs() || output.isDirectory) { "Cannot create folder: ${entry.name}" }
+                    } else {
+                        output.parentFile?.let { check(it.mkdirs() || it.isDirectory) { "Cannot create parent folder." } }
+                        zip.getInputStream(entry).use { input ->
+                            FileOutputStream(output).use { out ->
+                                val buffer = ByteArray(128 * 1024)
+                                while (true) {
+                                    val n = input.read(buffer)
+                                    if (n < 0) break
+                                    expanded += n
+                                    require(expanded <= 4L * 1024 * 1024 * 1024) { "Expanded ZIP exceeds 4 GiB limit." }
+                                    out.write(buffer, 0, n)
+                                }
+                                out.fd.sync()
+                            }
+                        }
+                        output.setLastModified(entry.time.takeIf { it > 0 } ?: output.lastModified())
+                    }
+                }
+            }
+            check(staging.renameTo(destination)) { "Could not finish extraction into destination." }
+        } catch (failure: Throwable) {
+            deleteSafely(staging)
+            throw failure
+        }
+    }
+
     fun validateName(name: String) {
         require(name.isNotBlank() && name != "." && name != "..") { "Enter a valid name." }
         require(!name.contains('/') && !name.contains('\\') && name.none { it.code < 32 }) { "Name contains invalid characters." }
