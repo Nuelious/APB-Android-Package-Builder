@@ -127,11 +127,12 @@ private fun FileManagerScreen(
         val p = canonical(file).path
         return p == r || p.startsWith(r + File.separator)
     }
-    fun protected(file: File): Boolean {
-        if (tab != 1) return false
-        val runtime = File(privateRoot, "runtime")
-        return canonical(file) == canonical(privateRoot) || within(runtime, file)
-    }
+    // Runtime protection is independent of the active tab so a cross-tab move
+    // cannot bypass the read-only guard.
+    fun protected(file: File): Boolean =
+        within(File(privateRoot, "runtime"), file)
+
+    val currentReadOnly = within(File(privateRoot, "runtime"), current)
     fun navigate(folder: File) {
         if (!within(base, folder) || !folder.isDirectory) return
         if (tab == 0) externalPath = folder else privatePath = folder
@@ -205,6 +206,7 @@ private fun FileManagerScreen(
         perform(if (clipboardIsCut) "Moving…" else "Copying…") {
             sources.forEach { source ->
                 require(source.exists()) { "Source no longer exists: ${source.name}" }
+                require(!within(File(privateRoot, "runtime"), File(current, source.name))) { "The APB runtime directory is read-only." }
                 require(within(if (within(externalRoot, source)) externalRoot else privateRoot, source)) {
                     "Source is outside APB's allowed storage roots."
                 }
@@ -276,7 +278,7 @@ private fun FileManagerScreen(
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                         Text(if (clipboard.isEmpty()) status else "${clipboard.size} on clipboard · ${if (clipboardIsCut) "Move" else "Copy"}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                        TextButton(onClick = { paste(false) }, enabled = clipboard.isNotEmpty() && !busy) { Text("Paste here") }
+                        TextButton(onClick = { paste(false) }, enabled = clipboard.isNotEmpty() && !busy && !currentReadOnly) { Text("Paste here") }
                         if (clipboard.isNotEmpty()) TextButton(onClick = { clipboard = emptyList(); status = "Clipboard cleared" }) { Text("Clear") }
                     }
                     if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -325,8 +327,8 @@ private fun FileManagerScreen(
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 6.dp)) {
                     OutlinedButton(onClick = { current.parentFile?.takeIf { within(base, it) }?.let(::navigate) }, enabled = canonical(current) != canonical(base)) { Text("Up") }
-                    OutlinedButton(onClick = { dialog = "folder"; inputName = "" }, enabled = !busy) { Text("New folder") }
-                    OutlinedButton(onClick = { dialog = "file"; inputName = "" }, enabled = !busy) { Text("New file") }
+                    OutlinedButton(onClick = { dialog = "folder"; inputName = "" }, enabled = !busy && !currentReadOnly) { Text("New folder") }
+                    OutlinedButton(onClick = { dialog = "file"; inputName = "" }, enabled = !busy && !currentReadOnly) { Text("New file") }
                     Text("${entries.size} items", modifier = Modifier.align(Alignment.CenterVertically), style = MaterialTheme.typography.labelSmall)
                 }
                 if (tab == 1 && within(File(privateRoot, "runtime"), current)) {
