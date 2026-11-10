@@ -9,6 +9,7 @@ plugins {
 }
 
 val generatedProot = layout.buildDirectory.dir("generated/proot")
+val generatedRuntimeAssets = layout.buildDirectory.dir("generated/runtimeAssets")
 val prepareArm64Proot by tasks.registering {
     val output = generatedProot
     outputs.dir(output)
@@ -25,7 +26,6 @@ val prepareArm64Proot by tasks.registering {
             "PRoot archive checksum mismatch"
         }
         val nativeDir = root.resolve("jni/arm64-v8a").apply { mkdirs() }
-        
         ZipFile(zip).use { archive ->
             val binary = archive.getEntry("proot") ?: error("PRoot archive has no proot executable")
             archive.getInputStream(binary).use { it.copyTo(nativeDir.resolve("libproot.so").outputStream()) }
@@ -41,6 +41,41 @@ val prepareArm64Proot by tasks.registering {
     }
 }
 
+val prepareBundledRuntime by tasks.registering {
+    val output = generatedRuntimeAssets
+    outputs.dir(output)
+    doLast {
+        val root = output.get().asFile
+        val runtimeDir = root.resolve("runtime").apply { mkdirs() }
+        val archive = runtimeDir.resolve("apb-runtime-arm64.zip")
+        val checksum = runtimeDir.resolve("apb-runtime-arm64.zip.sha256")
+        val api = URL("https://api.github.com/repos/Nuelious/APB-Android-Package-Builder/releases/latest")
+        val connection = api.openConnection().apply { setRequestProperty("User-Agent", "APB-Android-Package-Builder") }
+        val release = connection.getInputStream().bufferedReader().use { org.json.JSONObject(it.readText()) }
+        check(!release.optBoolean("draft") && !release.optBoolean("prerelease")) { "Latest APB runtime release is not public." }
+        val assets = release.getJSONArray("assets")
+        fun asset(name: String): String {
+            for (i in 0 until assets.length()) {
+                val item = assets.getJSONObject(i)
+                if (item.getString("name") == name) return item.getString("browser_download_url")
+            }
+            error("Runtime release is missing $name")
+        }
+        fun download(address: String, file: java.io.File) {
+            val c = URL(address).openConnection().apply { setRequestProperty("User-Agent", "APB-Android-Package-Builder") }
+            c.getInputStream().use { input -> file.outputStream().use { input.copyTo(it) } }
+        }
+        download(asset("apb-runtime-arm64.zip"), archive)
+        download(asset("apb-runtime-arm64.zip.sha256"), checksum)
+        val expected = checksum.readText().trim().split(Regex("\\s+")).first().lowercase()
+        val actual = MessageDigest.getInstance("SHA-256").digest(archive.readBytes()).joinToString("") { "%02x".format(it) }
+        check(expected.matches(Regex("[a-f0-9]{64}")) && actual == expected) { "Bundled runtime ZIP checksum mismatch." }
+        runtimeDir.resolve("runtime-release.json").writeText(
+            org.json.JSONObject().put("tag", release.optString("tag_name")).put("sha256", actual).toString()
+        )
+    }
+}
+
 android {
     namespace = "com.nuelious.android.apb"
     compileSdk = 35
@@ -53,12 +88,9 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     sourceSets["main"].jniLibs.srcDir(generatedProot.map { it.dir("jni") })
-    packaging {
-        jniLibs {
-            useLegacyPackaging = true
-        }
-    }
-    tasks.named("preBuild").configure { dependsOn(prepareArm64Proot) }
+    sourceSets["main"].assets.srcDir(generatedRuntimeAssets)
+    packaging { jniLibs { useLegacyPackaging = true } }
+    tasks.named("preBuild").configure { dependsOn(prepareArm64Proot, prepareBundledRuntime) }
     buildFeatures { compose = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
