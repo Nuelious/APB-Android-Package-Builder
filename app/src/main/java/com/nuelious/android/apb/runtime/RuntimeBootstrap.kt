@@ -154,11 +154,15 @@ class RuntimeBootstrap(private val context: Context) {
                         val targetPath = Paths.get(target)
                         require(!targetPath.isAbsolute) { "Absolute symlink target is not allowed: ${entry.name} -> $target" }
                         output.parentFile?.mkdirs()
-                        val runtimeRoot = destination.toPath().toAbsolutePath().normalize()
-                        val linkParent = output.parentFile.toPath().toAbsolutePath().normalize()
+                        // Use canonical paths for BOTH sides. Android commonly exposes
+                        // app-private storage through /data/data and /data/user/0 aliases;
+                        // comparing one canonical path with one absolute-but-noncanonical path
+                        // falsely classifies valid in-root links as escapes.
+                        val runtimeRoot = destination.canonicalFile.toPath().normalize()
+                        val linkParent = output.parentFile.canonicalFile.toPath().normalize()
                         val resolved = linkParent.resolve(targetPath).normalize()
                         require(resolved.startsWith(runtimeRoot)) {
-                            "Symlink escapes runtime root: ${entry.name} -> $target (resolves to $resolved)"
+                            "Symlink escapes runtime root: ${entry.name} -> $target (resolves to $resolved; root $runtimeRoot)"
                         }
                         Files.createSymbolicLink(output.toPath(), targetPath)
                     }
