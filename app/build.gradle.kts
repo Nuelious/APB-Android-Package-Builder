@@ -33,12 +33,18 @@ val prepareArm64Proot by tasks.registering {
             val entries = archive.entries()
             while (entries.hasMoreElements()) {
                 val entry = entries.nextElement()
-                if (!entry.isDirectory && entry.name == "loader/loader") {
-                    archive.getInputStream(entry).use { it.copyTo(nativeDir.resolve("libproot-loader.so").outputStream()) }
+                if (!entry.isDirectory && entry.name == "loader") {
+                    archive.getInputStream(entry).use { input ->
+                        nativeDir.resolve("libproot-loader.so").outputStream().use { output -> input.copyTo(output) }
+                    }
                 }
             }
         }
         zip.delete()
+        val prootBinary = nativeDir.resolve("libproot.so")
+        val loaderBinary = nativeDir.resolve("libproot-loader.so")
+        check(prootBinary.isFile && prootBinary.length() > 0L) { "PRoot archive did not provide its proot executable." }
+        check(loaderBinary.isFile && loaderBinary.length() > 0L) { "PRoot archive did not provide its loader executable (expected ZIP entry 'loader')." }
     }
 }
 
