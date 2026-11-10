@@ -62,7 +62,7 @@ class MainActivity:ComponentActivity(){
        Text("ARM64 build environment", style=MaterialTheme.typography.titleMedium)
        Text(if(runtimeReady) "Linux ARM64, JDK 17, Gradle and Android build tools are installed in APB private storage."
             else "The initial runtime download is several hundred MB and needs over 1 GB of free internal storage. Wi-Fi is recommended.")
-       if(runtimeBusy) { BucketProgressPanel(runtimeProgress.percent, runtimeProgress.message, runtimeProgress.currentFile, runtimeProgress.details, runtimeProgress.downloaded, runtimeProgress.total, "install") } else if(!runtimeReady) { Button(onClick = { installRuntime(force = false) }) { Text("Install build environment") }; OutlinedButton(onClick = { runtimeZipPicker.launch(arrayOf("application/zip", "application/octet-stream", "application/x-zip-compressed")) }) { Text("Choose runtime ZIP…") } }
+       if(runtimeBusy) { BucketProgressPanel(runtimeProgress.percent, runtimeProgress.message, runtimeProgress.currentFile, runtimeProgress.details, runtimeProgress.downloaded, runtimeProgress.total, "install", onInfo = { runtimeDetails = true }) } else if(!runtimeReady) { Button(onClick = { installRuntime(force = false) }) { Text("Install build environment") }; OutlinedButton(onClick = { runtimeZipPicker.launch(arrayOf("application/zip", "application/octet-stream", "application/x-zip-compressed")) }) { Text("Choose runtime ZIP…") } }
        else {
         Text("Runtime verified and ready.")
         OutlinedButton(onClick = { installRuntime(force = true) }) { Text("Reinstall build environment") }
@@ -83,6 +83,19 @@ class MainActivity:ComponentActivity(){
     item{Text("Confidential project folder ends at /storage/emulated/0/apps/ADB/.t/.h/.i/.s/.i/.s/.p/.r/.i/.v/.a/.t/.e",style=MaterialTheme.typography.labelSmall)}
    }
   }
+  if(runtimeDetails) AlertDialog(
+   onDismissRequest = { runtimeDetails = false },
+   title = { Text("Runtime installation details") },
+   text = { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Text("Progress: ${runtimeProgress.percent}%")
+    Text(runtimeProgress.message)
+    if (runtimeProgress.currentFile.isNotBlank()) Text("Current file: ${runtimeProgress.currentFile}")
+    if (runtimeProgress.downloaded > 0L || runtimeProgress.total > 0L) Text("Expanded: ${runtimeProgress.downloaded} / ${runtimeProgress.total} bytes")
+    if (runtimeProgress.details.isNotBlank()) Text(runtimeProgress.details)
+    if (runtimeBusy) LinearProgressIndicator(progress = { runtimeProgress.percent.coerceIn(0,100) / 100f }, modifier = Modifier.fillMaxWidth())
+   } },
+   confirmButton = { TextButton(onClick = { runtimeDetails = false }) { Text("Close") } }
+  )
   if(showTypeDialog)AlertDialog(onDismissRequest={showTypeDialog=false;pendingUri=null},title={Text("Select project type")},text={Column(verticalArrangement=Arrangement.spacedBy(6.dp)){Text("Choose the format APB should use to configure this folder.");ProjectType.entries.forEach{type->OutlinedButton(modifier=Modifier.fillMaxWidth(),onClick={val uri=pendingUri;showTypeDialog=false;pendingUri=null;if(uri!=null)lifecycleScope.launch{status="Importing as ${type.label}…";runCatching{store.importTree(uri,type)}.onSuccess{selected=it;refresh();status="Imported ${it.name}"}.onFailure{status="Import failed: ${it.message}"}}}){Text(type.label)}}}},confirmButton={TextButton(onClick={showTypeDialog=false;pendingUri=null}){Text("Cancel")}})
  }}
  }
