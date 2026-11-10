@@ -185,9 +185,20 @@ private fun FileManagerScreen(
         progressKind = when { message.contains("Extract", true) -> "extract"; message.contains("Delet", true) -> "delete"; message.contains("Mov", true) -> "move"; message.contains("Renam", true) -> "rename"; else -> "copy" }
         status = message
         scope.launch {
+            FileTransfer.progressReporter = { file, done, total, completed, count ->
+                val pct = if (total > 0L) ((done * 100L) / total).toInt().coerceIn(0, 99)
+                          else if (count > 0) ((completed * 100f) / count).toInt().coerceIn(0, 99) else 0
+                scope.launch {
+                    progressPercent = pct
+                    progressFile = file
+                    progressInfo = "Processed $completed of $count files · $done / $total bytes"
+                }
+            }
             val result = runCatching { withContext(Dispatchers.IO) { operation() } }
+            FileTransfer.progressReporter = null
             status = result.getOrElse { it.message ?: "Operation failed" }
             if (result.isSuccess) { progressPercent = 100; progressInfo = status }
+            else progressInfo = status
             busy = false
             refreshKey++
         }
@@ -493,6 +504,35 @@ private fun FileManagerScreen(
 }
 
 private object FileTransfer {
+    @Volatile var progressReporter: ((String, Long, Long, Int, Int) -> Unit)? = null
+    private data class ProgressState(val totalBytes: Long, val totalFiles: Int) {
+        var bytes = 0L
+        var files = 0
+        var lastPercent = -1
+        fun report(path: String, amount: Long = 0L, fileDone: Boolean = false) {
+            bytes += amount
+            if (fileDone) files++
+            val pct = if (totalBytes > 0L) ((bytes * 100L) / totalBytes).toInt().coerceIn(0, 99)
+                      else if (totalFiles > 0) ((files * 100f) / totalFiles).toInt().coerceIn(0, 99) else 0
+            if (pct != lastPercent || fileDone) {
+                lastPercent = pct
+                progressReporter?.invoke(path, bytes, totalBytes, files, totalFiles)
+            }
+        }
+    }
+    private fun measure(file: File): Pair<Long, Int> {
+        if (Files.isSymbolicLink(file.toPath())) return 0L to 1
+        if (!file.isDirectory) return file.length() to 1
+        var bytes = 0L
+        var count = 0
+        file.listFiles()?.forEach { child ->
+            val measured = measure(child)
+            bytes += measured.first
+            count += measured.second
+        }
+        return bytes to count
+    }
+
     /** Extracts an ordinary ZIP into a sibling staging folder, rejecting traversal, symlinks and special files. */
     fun extractZipSafely(archive: File, destination: File) {
         require(archive.isFile && archive.extension.equals("zip", true)) { "Select a valid ZIP archive." }
@@ -504,6 +544,14 @@ private object FileTransfer {
         var count = 0
         try {
             ZipFile.builder().setFile(archive).get().use { zip ->
+                val scan = zip.entries
+                var totalBytes = 0L
+                var totalFiles = 0
+                while (scan.hasMoreElements()) {
+                    val item = scan.nextElement()
+                    if (!item.isDirectory) { totalBytes += item.size.coerceAtLeast(0L); totalFiles++ }
+                }
+                val progress = ProgressState(totalBytes, totalFiles)
                 val entries = zip.entries
                 while (entries.hasMoreElements()) {
                     val entry = entries.nextElement()
@@ -529,12 +577,14 @@ private object FileTransfer {
                                     if (n < 0) break
                                     expanded += n
                                     require(expanded <= 4L * 1024 * 1024 * 1024) { "Expanded ZIP exceeds 4 GiB limit." }
+                                    progress.report(entry.name, n)
                                     out.write(buffer, 0, n)
                                 }
                                 out.fd.sync()
                             }
                         }
                         output.setLastModified(entry.time.takeIf { it > 0 } ?: output.lastModified())
+                        progress.report(entry.name, fileDone = true)
                     }
                 }
             }
@@ -552,13 +602,23 @@ private object FileTransfer {
 
     fun deleteSafely(file: File): Boolean {
         if (!file.exists()) return true
-        if (Files.isSymbolicLink(file.toPath())) return file.delete()
-        if (file.isDirectory) {
-            file.listFiles()?.forEach { child ->
-                if (!deleteSafely(child)) return false
+        val measured = measure(file)
+        val state = ProgressState(measured.first, measured.second)
+        fun remove(target: File): Boolean {
+            if (Files.isSymbolicLink(target.toPath())) {
+                val ok = target.delete()
+                if (ok) state.report(target.name, fileDone = true)
+                return ok
             }
+            if (target.isDirectory) {
+                val children = target.listFiles() ?: return false
+                for (child in children) if (!remove(child)) return false
+            }
+            val ok = target.delete()
+            if (ok) state.report(target.name, fileDone = true)
+            return ok
         }
-        return file.delete()
+        return remove(file)
     }
 
     fun copySafely(source: File, destination: File, replace: Boolean) {
@@ -569,7 +629,8 @@ private object FileTransfer {
         val staging = File(destination.parentFile, ".apb-transfer-${System.nanoTime()}")
         val backup = File(destination.parentFile, ".apb-backup-${System.nanoTime()}")
         try {
-            copyTree(source, staging)
+            val measured = measure(source)
+            copyTree(source, staging, ProgressState(measured.first, measured.second))
             if (destination.exists()) {
                 require(replace) { "Destination already exists: ${destination.name}" }
                 check(destination.renameTo(backup)) { "Could not preserve existing destination." }
@@ -587,20 +648,27 @@ private object FileTransfer {
         }
     }
 
-    private fun copyTree(source: File, destination: File) {
+    private fun copyTree(source: File, destination: File, progress: ProgressState) {
         require(!Files.isSymbolicLink(source.toPath())) { "Symbolic link found: ${source.name}" }
         if (source.isDirectory) {
             check(destination.mkdirs() || destination.isDirectory) { "Cannot create folder ${destination.name}" }
             val children = source.listFiles() ?: error("Cannot read folder ${source.name}")
-            children.forEach { child -> copyTree(child, File(destination, child.name)) }
+            children.forEach { child -> copyTree(child, File(destination, child.name), progress) }
         } else {
             FileInputStream(source).use { input ->
                 FileOutputStream(destination).use { output ->
-                    input.copyTo(output, 256 * 1024)
+                    val buffer = ByteArray(256 * 1024)
+                    while (true) {
+                        val n = input.read(buffer)
+                        if (n < 0) break
+                        output.write(buffer, 0, n)
+                        progress.report(source.name, n)
+                    }
                     output.fd.sync()
                 }
             }
             destination.setLastModified(source.lastModified())
+            progress.report(source.name, fileDone = true)
         }
     }
 
