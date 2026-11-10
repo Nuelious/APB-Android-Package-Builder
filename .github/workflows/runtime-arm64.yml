@@ -57,17 +57,60 @@ jobs:
           sudo chown -R "$USER":"$USER" package
           mkdir -p package/rootfs/usr/local/share/apb
           printf 'APB runtime build: %s\n' "$GITHUB_SHA" > package/rootfs/usr/local/share/apb/build-info.txt
-      - name: Package and checksum runtime
+      - name: Audit runtime filesystem before packaging
+        shell: bash
         run: |
-          set -euxo pipefail
-          tar --hard-dereference -czf apb-runtime-arm64.tar.gz -C package rootfs jdk gradle apktool.jar
-          sha256sum apb-runtime-arm64.tar.gz > apb-runtime-arm64.tar.gz.sha256
+          set -euo pipefail
+          # PRoot supplies these virtual filesystems at launch. Never ship live
+          # sockets, FIFOs or host pseudo-filesystem contents inside the archive.
+          for dir in dev proc sys run; do
+            sudo mkdir -p "package/rootfs/$dir"
+            sudo find "package/rootfs/$dir" -mindepth 1 -delete
+          done
+          special="$(sudo find package -type p -o -type s)"
+          if [ -n "$special" ]; then
+            echo "Runtime contains unsupported FIFO/socket entries:"
+            printf '%s\\n' "$special"
+            exit 1
+          fi
+          sudo chown -R "$USER":"$USER" package
+          test -x package/jdk/bin/java
+          test -x package/gradle/bin/gradle
+          test -f package/apktool.jar
+          test -x package/rootfs/usr/bin/env
+      - name: Package, validate and checksum runtime
+        shell: bash
+        env:
+          XZ_OPT: "-T1 -6"
+        run: |
+          set -euo pipefail
+          rm -f apb-runtime-arm64.tar.xz apb-runtime-arm64.tar.xz.sha256
+          # Direct file output: no tar | xz pipeline, so there is no downstream
+          # pipe closure that can truncate the archive or mask the failing step.
+          tar --format=posix --hard-dereference --numeric-owner --owner=0 --group=0 \\
+            -cJf apb-runtime-arm64.tar.xz -C package rootfs jdk gradle apktool.jar
+          test -s apb-runtime-arm64.tar.xz
+          xz -t apb-runtime-arm64.tar.xz
+          tar -tJf apb-runtime-arm64.tar.xz >/dev/null
+          mkdir -p archive-validation
+          tar -xJf apb-runtime-arm64.tar.xz -C archive-validation
+          test -x archive-validation/rootfs/usr/bin/env
+          test -x archive-validation/jdk/bin/java
+          test -x archive-validation/gradle/bin/gradle
+          test -f archive-validation/apktool.jar
+          if find archive-validation -type p -o -type s | grep -q .; then
+            echo "Validated archive unexpectedly contains a FIFO or socket."
+            exit 1
+          fi
+          sha256sum apb-runtime-arm64.tar.xz > apb-runtime-arm64.tar.xz.sha256
+          sha256sum -c apb-runtime-arm64.tar.xz.sha256
+          rm -rf archive-validation
       - name: Publish runtime release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('runtime-v{0}', github.run_number) }}
           name: APB ARM64 Runtime ${{ github.ref_name }}
           files: |
-            apb-runtime-arm64.tar.gz
-            apb-runtime-arm64.tar.gz.sha256
+            apb-runtime-arm64.tar.xz
+            apb-runtime-arm64.tar.xz.sha256
           generate_release_notes: true
