@@ -1,0 +1,32 @@
+name: Delete all workflow artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type DELETE to permanently remove every Actions artifact in this repository
+        required: true
+        type: string
+
+permissions:
+  actions: write
+
+jobs:
+  delete-artifacts:
+    if: ${{ inputs.confirm == 'DELETE' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete every Actions artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t artifact_ids < <(gh api --paginate "/repos/${GH_REPO}/actions/artifacts?per_page=100" --jq '.artifacts[].id')
+          echo "Found ${#artifact_ids[@]} workflow artifacts."
+          for artifact_id in "${artifact_ids[@]}"; do
+            gh api --method DELETE "/repos/${GH_REPO}/actions/artifacts/${artifact_id}"
+            echo "Deleted artifact ${artifact_id}"
+          done
+          echo "Artifact cleanup complete."
