@@ -1,6 +1,7 @@
 import java.net.URL
 import java.security.MessageDigest
 import java.util.zip.ZipFile
+import groovy.json.JsonSlurper
 
 plugins {
     id("com.android.application")
@@ -45,22 +46,23 @@ val prepareBundledRuntime by tasks.registering {
     val output = generatedRuntimeAssets
     outputs.dir(output)
     doLast {
+        if (gradle.startParameter.taskNames.any { it.contains("test", ignoreCase = true) }) return@doLast
         val root = output.get().asFile
         val runtimeDir = root.resolve("runtime").apply { mkdirs() }
         val archive = runtimeDir.resolve("apb-runtime-arm64.zip")
         val checksum = runtimeDir.resolve("apb-runtime-arm64.zip.sha256")
         val api = URL("https://api.github.com/repos/Nuelious/APB-Android-Package-Builder/releases/latest")
         val connection = api.openConnection().apply { setRequestProperty("User-Agent", "APB-Android-Package-Builder") }
-        val release = connection.getInputStream().bufferedReader().use { org.json.JSONObject(it.readText()) }
-        check(!release.optBoolean("draft") && !release.optBoolean("prerelease")) { "Latest APB runtime release is not public." }
-        val assets = release.getJSONArray("assets")
-        fun asset(name: String): String {
-            for (i in 0 until assets.length()) {
-                val item = assets.getJSONObject(i)
-                if (item.getString("name") == name) return item.getString("browser_download_url")
-            }
-            error("Runtime release is missing $name")
+        val release = connection.getInputStream().bufferedReader().use {
+            @Suppress("UNCHECKED_CAST")
+            groovy.json.JsonSlurper().parseText(it.readText()) as Map<String, Any?>
         }
+        check(release["draft"] != true && release["prerelease"] != true) { "Latest APB runtime release is not public." }
+        @Suppress("UNCHECKED_CAST")
+        val assets = release["assets"] as? List<Map<String, Any?>> ?: error("Runtime release has no assets.")
+        fun asset(name: String): String =
+            assets.firstOrNull { it["name"] == name }?.get("browser_download_url") as? String
+                ?: error("Runtime release is missing $name")
         fun download(address: String, file: java.io.File) {
             val c = URL(address).openConnection().apply { setRequestProperty("User-Agent", "APB-Android-Package-Builder") }
             c.getInputStream().use { input -> file.outputStream().use { input.copyTo(it) } }
@@ -71,7 +73,7 @@ val prepareBundledRuntime by tasks.registering {
         val actual = MessageDigest.getInstance("SHA-256").digest(archive.readBytes()).joinToString("") { "%02x".format(it) }
         check(expected.matches(Regex("[a-f0-9]{64}")) && actual == expected) { "Bundled runtime ZIP checksum mismatch." }
         runtimeDir.resolve("runtime-release.json").writeText(
-            org.json.JSONObject().put("tag", release.optString("tag_name")).put("sha256", actual).toString()
+            """{"tag":"${release["tag_name"] ?: "unknown"}","sha256":"$actual"}"""
         )
     }
 }
