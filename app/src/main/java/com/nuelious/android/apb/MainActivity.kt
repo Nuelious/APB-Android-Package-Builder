@@ -63,8 +63,11 @@ class MainActivity:ComponentActivity(){
         if(runtimeProgress.total > 0) LinearProgressIndicator(progress = { (runtimeProgress.downloaded.toFloat() / runtimeProgress.total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
         else LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         Text(runtimeProgress.message)
-       } else if(!runtimeReady) Button(onClick = { installRuntime() }) { Text("Install build environment") }
-       else Text("Runtime verified and ready.")
+       } else if(!runtimeReady) Button(onClick = { installRuntime(force = false) }) { Text("Install build environment") }
+       else {
+        Text("Runtime verified and ready.")
+        OutlinedButton(onClick = { installRuntime(force = true) }) { Text("Reinstall build environment") }
+       }
        runtimeError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
       }
      }
@@ -83,10 +86,10 @@ class MainActivity:ComponentActivity(){
   if(showTypeDialog)AlertDialog(onDismissRequest={showTypeDialog=false;pendingUri=null},title={Text("Select project type")},text={Column(verticalArrangement=Arrangement.spacedBy(6.dp)){Text("Choose the format APB should use to configure this folder.");ProjectType.entries.forEach{type->OutlinedButton(modifier=Modifier.fillMaxWidth(),onClick={val uri=pendingUri;showTypeDialog=false;pendingUri=null;if(uri!=null)lifecycleScope.launch{status="Importing as ${type.label}…";runCatching{store.importTree(uri,type)}.onSuccess{selected=it;refresh();status="Imported ${it.name}"}.onFailure{status="Import failed: ${it.message}"}}}){Text(type.label)}}}},confirmButton={TextButton(onClick={showTypeDialog=false;pendingUri=null}){Text("Cancel")}})
  }}
  }
- private fun installRuntime() {
-  if(runtimeBusy || runtimeReady) return
+ private fun installRuntime(force: Boolean) {
+  if(runtimeBusy || (runtimeReady && !force)) return
   val installer = RuntimeBootstrap(this)
-  if(installer.isInstalled()) { runtimeReady = true; return }
+  if(!force && installer.isInstalled()) { runtimeReady = true; return }
   if(filesDir.usableSpace < 1536L * 1024L * 1024L) {
    runtimeError = "At least 1.5 GB of free internal storage is recommended."
    return
