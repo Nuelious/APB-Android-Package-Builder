@@ -8,29 +8,56 @@ import android.os.Environment
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.nio.file.Files
+import java.text.DateFormat
+import java.util.Date
+import java.util.Locale
 
 class FileManagerActivity : ComponentActivity() {
+    private var externalAccess by mutableStateOf(false)
+
+    private fun updateAccess() {
+        externalAccess = Build.VERSION.SDK_INT < 30 || Environment.isExternalStorageManager()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        updateAccess()
         setContent {
             MaterialTheme {
                 FileManagerScreen(
                     externalRoot = Environment.getExternalStorageDirectory(),
-                    privateRoot = File(applicationInfo.dataDir),
-                    hasAccess = { Build.VERSION.SDK_INT < 30 || Environment.isExternalStorageManager() },
-                    requestAccess = {
+                    // Expose only APB's files/ sandbox, never databases, preferences or app code.
+                    privateRoot = filesDir,
+                    hasExternalAccess = externalAccess,
+                    requestExternalAccess = {
                         if (Build.VERSION.SDK_INT >= 30) {
-                            val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName"))
-                            runCatching { startActivity(intent) }.onFailure {
+                            val appIntent = Intent(
+                                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                Uri.parse("package:$packageName")
+                            )
+                            runCatching { startActivity(appIntent) }.onFailure {
                                 startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
                             }
                         }
@@ -40,183 +67,359 @@ class FileManagerActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onResume() {
+        super.onResume()
+        updateAccess()
+    }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+private enum class SortMode(val label: String) {
+    NAME("Name"), SIZE("Size"), MODIFIED("Date modified"), TYPE("Type")
+}
+
+private data class FileDetails(
+    val name: String,
+    val path: String,
+    val type: String,
+    val size: Long,
+    val modified: Long,
+    val readable: Boolean,
+    val writable: Boolean
+)
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 private fun FileManagerScreen(
     externalRoot: File,
     privateRoot: File,
-    hasAccess: () -> Boolean,
-    requestAccess: () -> Unit,
+    hasExternalAccess: Boolean,
+    requestExternalAccess: () -> Unit,
     onClose: () -> Unit
 ) {
     var tab by remember { mutableIntStateOf(0) }
     var externalPath by remember { mutableStateOf(externalRoot) }
     var privatePath by remember { mutableStateOf(privateRoot) }
-    var selected by remember { mutableStateOf<File?>(null) }
-    var clipboard by remember { mutableStateOf<File?>(null) }
-    var isCut by remember { mutableStateOf(false) }
-    var status by remember { mutableStateOf("Ready") }
-    var dialog by remember { mutableStateOf("") }
-    var name by remember { mutableStateOf("") }
-    var replaceTarget by remember { mutableStateOf<File?>(null) }
-
     val base = if (tab == 0) externalRoot else privateRoot
     val current = if (tab == 0) externalPath else privatePath
 
+    val selected = remember { mutableStateListOf<File>() }
+    var clipboard by remember { mutableStateOf<List<File>>(emptyList()) }
+    var clipboardIsCut by remember { mutableStateOf(false) }
+    var showHidden by remember { mutableStateOf(false) }
+    var search by remember { mutableStateOf("") }
+    var sortMode by remember { mutableStateOf(SortMode.NAME) }
+    var descending by remember { mutableStateOf(false) }
+    var sortMenu by remember { mutableStateOf(false) }
+    var actionMenu by remember { mutableStateOf(false) }
+    var dialog by remember { mutableStateOf("") }
+    var inputName by remember { mutableStateOf("") }
+    var propertyFile by remember { mutableStateOf<File?>(null) }
+    var replaceTarget by remember { mutableStateOf<File?>(null) }
+    var pendingPaste by remember { mutableStateOf<List<File>>(emptyList()) }
+    var busy by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf("Ready") }
+    var refreshKey by remember { mutableIntStateOf(0) }
+
+    fun canonical(file: File) = runCatching { file.canonicalFile }.getOrDefault(file.absoluteFile)
+    fun within(root: File, file: File): Boolean {
+        val r = canonical(root).path
+        val p = canonical(file).path
+        return p == r || p.startsWith(r + File.separator)
+    }
+    fun protected(file: File): Boolean {
+        if (tab != 1) return false
+        val runtime = File(privateRoot, "runtime")
+        return canonical(file) == canonical(privateRoot) || within(runtime, file)
+    }
     fun navigate(folder: File) {
+        if (!within(base, folder) || !folder.isDirectory) return
         if (tab == 0) externalPath = folder else privatePath = folder
-        selected = null
+        selected.clear()
+        search = ""
+        refreshKey++
     }
 
-    fun withinRoot(file: File): Boolean {
-        val rootPath = base.canonicalPath
-        val path = file.canonicalPath
-        return path == rootPath || path.startsWith(rootPath + File.separator)
-    }
-
-    fun copyRecursively(source: File, destination: File) {
-        require(!destination.canonicalPath.startsWith(source.canonicalPath + File.separator)) {
-            "Cannot copy a folder into itself."
+    val accessGranted = tab == 1 || hasExternalAccess
+    val entries = remember(current, showHidden, search, sortMode, descending, refreshKey, accessGranted) {
+        if (!accessGranted) emptyList() else {
+            val found = runCatching { current.listFiles()?.toList().orEmpty() }.getOrDefault(emptyList())
+                .filter { it.name != "." && it.name != ".." }
+                .filter { showHidden || !it.name.startsWith(".") }
+                .filter { search.isBlank() || it.name.contains(search, ignoreCase = true) }
+                .filter { within(base, it) }
+            val sorted = when (sortMode) {
+                SortMode.NAME -> found.sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase(Locale.ROOT) })
+                SortMode.SIZE -> found.sortedBy { if (it.isDirectory) directorySize(it) else it.length() }
+                SortMode.MODIFIED -> found.sortedBy { it.lastModified() }
+                SortMode.TYPE -> found.sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.extension.lowercase(Locale.ROOT) }.thenBy { it.name.lowercase(Locale.ROOT) })
+            }
+            if (descending) sorted.reversed() else sorted
         }
-        if (source.isDirectory) {
-            check(destination.exists() || destination.mkdirs())
-            source.listFiles()?.forEach { child -> copyRecursively(child, File(destination, child.name)) }
-        } else {
-            destination.parentFile?.mkdirs()
-            source.inputStream().use { input ->
-                destination.outputStream().use { output -> input.copyTo(output) }
+    }
+
+    fun runOperation(message: String, operation: suspend () -> String) {
+        if (busy) return
+        busy = true
+        status = message
+        // Use the Activity lifecycle scope via the composable's coroutine scope.
+    }
+
+    val scope = rememberCoroutineScope()
+    fun perform(message: String, operation: suspend () -> String) {
+        if (busy) return
+        busy = true
+        status = message
+        scope.launch {
+            val result = runCatching { withContext(Dispatchers.IO) { operation() } }
+            status = result.getOrElse { it.message ?: "Operation failed" }
+            busy = false
+            refreshKey++
+        }
+    }
+
+    fun copyToClipboard(cut: Boolean) {
+        val candidates = selected.toList()
+        if (candidates.isEmpty()) return
+        if (cut && candidates.any { protected(it) }) {
+            status = "APB runtime files are protected from moving."
+            return
+        }
+        clipboard = candidates
+        clipboardIsCut = cut
+        status = if (cut) "${candidates.size} item(s) ready to move" else "${candidates.size} item(s) copied"
+    }
+
+    fun paste(replace: Boolean) {
+        val sources = pendingPaste.ifEmpty { clipboard }
+        if (sources.isEmpty()) return
+        val targets = sources.map { File(current, it.name) }
+        if (!replace) {
+            val collision = targets.firstOrNull { it.exists() }
+            if (collision != null) {
+                replaceTarget = collision
+                pendingPaste = sources
+                return
             }
         }
+        perform(if (clipboardIsCut) "Moving…" else "Copying…") {
+            sources.forEach { source ->
+                require(source.exists()) { "Source no longer exists: ${source.name}" }
+                require(within(if (within(externalRoot, source)) externalRoot else privateRoot, source)) {
+                    "Source is outside APB's allowed storage roots."
+                }
+                val destination = File(current, source.name)
+                require(canonical(source) != canonical(destination)) { "Source and destination are identical." }
+                require(!source.isDirectory || !within(source, destination)) { "Cannot paste a folder into itself." }
+                if (clipboardIsCut) require(!(tab == 1 && protected(source))) { "APB runtime files are protected." }
+                FileTransfer.copySafely(source, destination, replace)
+                if (clipboardIsCut) {
+                    check(FileTransfer.deleteSafely(source)) { "Copied, but could not remove original ${source.name}." }
+                }
+            }
+            clipboard = emptyList()
+            pendingPaste = emptyList()
+            clipboardIsCut = false
+            selected.clear()
+            "Transfer completed."
+        }
+        replaceTarget = null
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("APB File Manager") },
-                navigationIcon = { TextButton(onClick = onClose) { Text("Close") } }
+                title = { Column { Text("APB File Manager"); Text(if (tab == 0) "Shared storage" else "APB app files", style = MaterialTheme.typography.labelSmall) } },
+                navigationIcon = { TextButton(onClick = onClose) { Text("Close") } },
+                actions = {
+                    Box {
+                        TextButton(onClick = { sortMenu = true }) { Text("Sort") }
+                        DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
+                            SortMode.entries.forEach { mode ->
+                                DropdownMenuItem(
+                                    text = { Text(if (sortMode == mode) "✓ ${mode.label}" else mode.label) },
+                                    onClick = { sortMode = mode; sortMenu = false }
+                                )
+                            }
+                            DropdownMenuItem(text = { Text(if (descending) "Ascending" else "Descending") }, onClick = { descending = !descending; sortMenu = false })
+                        }
+                    }
+                    Box {
+                        TextButton(onClick = { actionMenu = true }) { Text("More") }
+                        DropdownMenu(expanded = actionMenu, onDismissRequest = { actionMenu = false }) {
+                            DropdownMenuItem(text = { Text(if (showHidden) "Hide hidden files" else "Show hidden files") }, onClick = { showHidden = !showHidden; actionMenu = false })
+                            DropdownMenuItem(text = { Text("Select all") }, onClick = { selected.clear(); selected.addAll(entries); actionMenu = false })
+                            DropdownMenuItem(text = { Text("Invert selection") }, onClick = {
+                                val old = selected.toSet()
+                                selected.clear()
+                                selected.addAll(entries.filterNot { it in old })
+                                actionMenu = false
+                            })
+                            DropdownMenuItem(text = { Text("Refresh") }, onClick = { refreshKey++; actionMenu = false })
+                        }
+                    }
+                }
             )
+        },
+        bottomBar = {
+            Surface(tonalElevation = 3.dp) {
+                Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 10.dp, vertical = 6.dp)) {
+                    if (selected.isNotEmpty()) {
+                        Text("${selected.size} selected", style = MaterialTheme.typography.labelMedium)
+                        Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                            TextButton(onClick = { copyToClipboard(false) }) { Text("Copy") }
+                            TextButton(onClick = { copyToClipboard(true) }) { Text("Cut") }
+                            TextButton(onClick = { dialog = "rename"; inputName = selected.singleOrNull()?.name.orEmpty() }, enabled = selected.size == 1 && !protected(selected.first())) { Text("Rename") }
+                            TextButton(onClick = { propertyFile = selected.singleOrNull() }, enabled = selected.size == 1) { Text("Properties") }
+                            TextButton(onClick = { dialog = "delete" }, enabled = selected.none { protected(it) }) { Text("Delete") }
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (clipboard.isEmpty()) status else "${clipboard.size} on clipboard · ${if (clipboardIsCut) "Move" else "Copy"}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { paste(false) }, enabled = clipboard.isNotEmpty() && !busy) { Text("Paste here") }
+                        if (clipboard.isNotEmpty()) TextButton(onClick = { clipboard = emptyList(); status = "Clipboard cleared" }) { Text("Clear") }
+                    }
+                    if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+            }
         }
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).padding(12.dp)) {
+        Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
             TabRow(selectedTabIndex = tab) {
-                Tab(selected = tab == 0, onClick = { tab = 0; selected = null }, text = { Text("External storage") })
-                Tab(selected = tab == 1, onClick = { tab = 1; selected = null }, text = { Text("APB private") })
+                Tab(selected = tab == 0, onClick = { tab = 0; selected.clear(); search = "" }, text = { Text("External storage") })
+                Tab(selected = tab == 1, onClick = { tab = 1; selected.clear(); search = "" }, text = { Text("APB private") })
             }
 
-            Text(current.absolutePath, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val root = canonical(base)
+                val path = canonical(current)
+                TextButton(onClick = { navigate(root) }) { Text(if (tab == 0) "Storage" else "APB files") }
+                val relative = path.path.removePrefix(root.path).trim(File.separatorChar)
+                var accumulated = root
+                relative.split(File.separatorChar).filter { it.isNotBlank() }.forEach { segment ->
+                    Text("›")
+                    accumulated = File(accumulated, segment)
+                    val crumb = accumulated
+                    TextButton(onClick = { navigate(crumb) }) { Text(segment) }
+                }
+            }
 
-            if (tab == 0 && !hasAccess()) {
-                Text("Grant all-files access to browse shared storage.")
-                Button(onClick = requestAccess) { Text("Grant access") }
+            if (tab == 0 && !hasExternalAccess) {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Storage permission required", style = MaterialTheme.typography.titleMedium)
+                        Text("Grant APB all-files access to browse shared storage.")
+                        Button(onClick = requestExternalAccess, modifier = Modifier.padding(top = 8.dp)) { Text("Grant access") }
+                    }
+                }
             } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    OutlinedButton(
-                        enabled = current != base,
-                        onClick = { current.parentFile?.takeIf { withinRoot(it) }?.let(::navigate) }
-                    ) { Text("Up") }
-                    OutlinedButton(onClick = { dialog = "folder"; name = "" }) { Text("New folder") }
-                    OutlinedButton(onClick = { dialog = "file"; name = "" }) { Text("New file") }
-                }
-
-                selected?.let { file ->
-                    Text("Selected: ${file.name}", modifier = Modifier.padding(top = 8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        OutlinedButton(onClick = { clipboard = file; isCut = false; status = "Copied to clipboard" }) { Text("Copy") }
-                        OutlinedButton(onClick = { clipboard = file; isCut = true; status = "Ready to move" }) { Text("Cut") }
-                        OutlinedButton(onClick = { dialog = "rename"; name = file.name }) { Text("Rename") }
-                        OutlinedButton(onClick = {
-                            status = if (file.deleteRecursively()) "Deleted" else "Delete failed"
-                            selected = null
-                        }) { Text("Delete") }
-                    }
-                }
-
+                OutlinedTextField(
+                    value = search,
+                    onValueChange = { search = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("Search this folder") }
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 6.dp)) {
-                    Button(enabled = clipboard != null, onClick = {
-                        val source = clipboard
-                        if (source != null) runCatching {
-                            check(withinRoot(current))
-                            val destination = File(current, source.name)
-                            require(source.canonicalFile != destination.canonicalFile) { "Source and destination are identical." }
-                            require(!source.isDirectory || !destination.canonicalPath.startsWith(source.canonicalPath + File.separator)) {
-                                "Cannot paste a folder into itself."
-                            }
-                            if (destination.exists()) {
-                                replaceTarget = destination
-                            } else {
-                                copyRecursively(source, destination)
-                                if (isCut) check(source.deleteRecursively())
-                                clipboard = null
-                                selected = null
-                                status = if (isCut) "Moved ${source.name}" else "Copied ${source.name}"
-                            }
-                        }.onFailure { status = it.message ?: "Paste failed" }
-                    }) { Text(if (isCut) "Move here" else "Paste here") }
-
-                    OutlinedButton(enabled = clipboard != null, onClick = { clipboard = null; status = "Clipboard cleared" }) {
-                        Text("Clear")
-                    }
+                    OutlinedButton(onClick = { current.parentFile?.takeIf { within(base, it) }?.let(::navigate) }, enabled = canonical(current) != canonical(base)) { Text("Up") }
+                    OutlinedButton(onClick = { dialog = "folder"; inputName = "" }, enabled = !busy) { Text("New folder") }
+                    OutlinedButton(onClick = { dialog = "file"; inputName = "" }, enabled = !busy) { Text("New file") }
+                    Text("${entries.size} items", modifier = Modifier.align(Alignment.CenterVertically), style = MaterialTheme.typography.labelSmall)
                 }
-
-                val entries = current.listFiles()
-                    ?.sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase() })
-                    .orEmpty()
-
+                if (tab == 1 && within(File(privateRoot, "runtime"), current)) {
+                    Text("Protected runtime directory · read-only in this file manager", style = MaterialTheme.typography.labelSmall)
+                }
                 LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
                     items(entries, key = { it.absolutePath }) { file ->
+                        val isSelected = selected.contains(file)
                         Row(
                             Modifier.fillMaxWidth()
-                                .clickable { if (file.isDirectory) navigate(file) else selected = file }
-                                .padding(10.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                .combinedClickable(
+                                    onClick = {
+                                        if (selected.isNotEmpty()) {
+                                            if (isSelected) selected.remove(file) else selected.add(file)
+                                        } else if (file.isDirectory) navigate(file) else selected.add(file)
+                                    },
+                                    onLongClick = { if (isSelected) selected.remove(file) else selected.add(file) }
+                                )
+                                .padding(horizontal = 8.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
+                            Text(if (file.isDirectory) "📁" else fileIcon(file), modifier = Modifier.padding(end = 12.dp))
                             Column(Modifier.weight(1f)) {
-                                Text((if (file.isDirectory) "📁 " else "📄 ") + file.name)
+                                Text(file.name, style = MaterialTheme.typography.bodyLarge)
                                 Text(
-                                    if (file.isDirectory) "Folder" else formatSize(file.length()),
+                                    if (file.isDirectory) "Folder · ${dateText(file.lastModified())}" else "${formatSize(file.length())} · ${dateText(file.lastModified())}",
                                     style = MaterialTheme.typography.bodySmall
                                 )
                             }
-                            if (selected == file) Text("Selected")
+                            if (protected(file)) Text("🔒", modifier = Modifier.padding(horizontal = 5.dp))
+                            if (isSelected) Text("✓", modifier = Modifier.padding(horizontal = 8.dp))
                         }
                         HorizontalDivider()
                     }
-                    if (entries.isEmpty()) item { Text("Empty folder") }
+                    if (entries.isEmpty()) item { Text(if (search.isBlank()) "This folder is empty." else "No matching files.", modifier = Modifier.padding(20.dp)) }
                 }
             }
-
-            Text(status, style = MaterialTheme.typography.bodySmall)
-            Text("Confidential folder ends at .e", style = MaterialTheme.typography.labelSmall)
         }
     }
 
-    if (dialog.isNotEmpty()) {
+    if (dialog.isNotBlank()) {
         AlertDialog(
             onDismissRequest = { dialog = "" },
-            title = { Text(dialog.replaceFirstChar { it.uppercase() }) },
+            title = { Text(when (dialog) { "folder" -> "Create folder"; "file" -> "Create file"; "rename" -> "Rename item"; else -> "Delete selected items?" }) },
             text = {
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") })
+                if (dialog == "delete") Text("Permanently delete ${selected.size} selected item(s)? This cannot be undone.")
+                else OutlinedTextField(
+                    value = inputName,
+                    onValueChange = { inputName = it },
+                    label = { Text("Name") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None)
+                )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    runCatching {
-                        require(name.isNotBlank() && name !in setOf(".", "..") && !name.contains('/') && !name.contains('\\'))
-                        when (dialog) {
-                            "rename" -> {
-                                val source = selected ?: error("Select an item first.")
-                                val destination = File(source.parentFile, name)
-                                check(!destination.exists() && source.renameTo(destination))
-                                selected = null
+                TextButton(enabled = !busy, onClick = {
+                    when (dialog) {
+                        "delete" -> {
+                            val targets = selected.toList()
+                            perform("Deleting…") {
+                                targets.forEach { check(!protected(it)) { "APB runtime files are protected." }; check(FileTransfer.deleteSafely(it)) { "Could not delete ${it.name}" } }
+                                selected.clear()
+                                "Deleted ${targets.size} item(s)."
                             }
-                            "file" -> check(File(current, name).createNewFile())
-                            else -> check(File(current, name).mkdir())
                         }
-                        status = "Done"
-                    }.onFailure { status = it.message ?: "Operation failed" }
+                        "rename" -> {
+                            val source = selected.singleOrNull()
+                            val newName = inputName.trim()
+                            if (source == null) status = "Select one item to rename."
+                            else perform("Renaming…") {
+                                FileTransfer.validateName(newName)
+                                check(!protected(source)) { "APB runtime files are protected." }
+                                val destination = File(source.parentFile, newName)
+                                check(!destination.exists()) { "An item with that name already exists." }
+                                check(source.renameTo(destination)) { "Rename failed." }
+                                selected.clear()
+                                "Renamed to $newName"
+                            }
+                        }
+                        "folder", "file" -> {
+                            val newName = inputName.trim()
+                            perform("Creating…") {
+                                FileTransfer.validateName(newName)
+                                val target = File(current, newName)
+                                check(!target.exists()) { "An item with that name already exists." }
+                                val made = if (dialog == "folder") target.mkdir() else target.createNewFile()
+                                check(made) { "Could not create $newName" }
+                                "Created $newName"
+                            }
+                        }
+                    }
                     dialog = ""
-                }) { Text("Confirm") }
+                }) { Text(if (dialog == "delete") "Delete" else "Confirm") }
             },
             dismissButton = { TextButton(onClick = { dialog = "" }) { Text("Cancel") } }
         )
@@ -224,31 +427,125 @@ private fun FileManagerScreen(
 
     replaceTarget?.let { target ->
         AlertDialog(
-            onDismissRequest = { replaceTarget = null },
+            onDismissRequest = { replaceTarget = null; pendingPaste = emptyList() },
             title = { Text("Replace existing item?") },
-            text = { Text("The destination already contains ${target.name}. Its contents will be replaced.") },
+            text = { Text("${target.name} already exists. Replace it after the new copy has been prepared?") },
             confirmButton = {
-                TextButton(onClick = {
-                    runCatching {
-                        val source = clipboard ?: error("Clipboard is empty.")
-                        check(target.deleteRecursively())
-                        copyRecursively(source, target)
-                        if (isCut) check(source.deleteRecursively())
-                        clipboard = null
-                        selected = null
-                        status = "Replaced ${target.name}"
-                    }.onFailure { status = it.message ?: "Replace failed" }
-                    replaceTarget = null
-                }) { Text("Replace") }
+                TextButton(onClick = { paste(true) }) { Text("Replace") }
             },
-            dismissButton = { TextButton(onClick = { replaceTarget = null }) { Text("Cancel") } }
+            dismissButton = { TextButton(onClick = { replaceTarget = null; pendingPaste = emptyList() }) { Text("Cancel") } }
+        )
+    }
+
+    propertyFile?.let { file ->
+        AlertDialog(
+            onDismissRequest = { propertyFile = null },
+            title = { Text("Properties") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text("Name: ${file.name}")
+                    Text("Type: ${if (file.isDirectory) "Folder" else file.extension.ifBlank { "File" }}")
+                    Text("Location: ${file.parent}")
+                    Text("Size: ${formatSize(if (file.isDirectory) directorySize(file) else file.length())}")
+                    Text("Modified: ${dateText(file.lastModified())}")
+                    Text("Readable: ${file.canRead()} · Writable: ${file.canWrite()}")
+                }
+            },
+            confirmButton = { TextButton(onClick = { propertyFile = null }) { Text("Close") } }
         )
     }
 }
 
+private object FileTransfer {
+    fun validateName(name: String) {
+        require(name.isNotBlank() && name != "." && name != "..") { "Enter a valid name." }
+        require(!name.contains('/') && !name.contains('\\') && name.none { it.code < 32 }) { "Name contains invalid characters." }
+    }
+
+    fun deleteSafely(file: File): Boolean {
+        if (!file.exists()) return true
+        if (Files.isSymbolicLink(file.toPath())) return file.delete()
+        if (file.isDirectory) {
+            file.listFiles()?.forEach { child ->
+                if (!deleteSafely(child)) return false
+            }
+        }
+        return file.delete()
+    }
+
+    fun copySafely(source: File, destination: File, replace: Boolean) {
+        require(source.exists()) { "Source does not exist." }
+        require(!Files.isSymbolicLink(source.toPath())) { "Symbolic links are not copied for safety." }
+        require(!source.isDirectory || !isWithin(source.canonicalFile, destination.canonicalFile)) { "Cannot copy a folder into itself." }
+        destination.parentFile?.let { check(it.exists() || it.mkdirs()) { "Cannot create destination folder." } }
+        val staging = File(destination.parentFile, ".apb-transfer-${System.nanoTime()}")
+        val backup = File(destination.parentFile, ".apb-backup-${System.nanoTime()}")
+        try {
+            copyTree(source, staging)
+            if (destination.exists()) {
+                require(replace) { "Destination already exists: ${destination.name}" }
+                check(destination.renameTo(backup)) { "Could not preserve existing destination." }
+            }
+            try {
+                check(staging.renameTo(destination)) { "Could not activate copied item." }
+            } catch (failure: Throwable) {
+                if (backup.exists()) backup.renameTo(destination)
+                throw failure
+            }
+            if (backup.exists()) check(deleteSafely(backup)) { "New copy completed, but old backup could not be removed." }
+        } finally {
+            if (staging.exists()) deleteSafely(staging)
+            if (backup.exists() && !destination.exists()) backup.renameTo(destination)
+        }
+    }
+
+    private fun copyTree(source: File, destination: File) {
+        require(!Files.isSymbolicLink(source.toPath())) { "Symbolic link found: ${source.name}" }
+        if (source.isDirectory) {
+            check(destination.mkdirs() || destination.isDirectory) { "Cannot create folder ${destination.name}" }
+            val children = source.listFiles() ?: error("Cannot read folder ${source.name}")
+            children.forEach { child -> copyTree(child, File(destination, child.name)) }
+        } else {
+            FileInputStream(source).use { input ->
+                FileOutputStream(destination).use { output ->
+                    input.copyTo(output, 256 * 1024)
+                    output.fd.sync()
+                }
+            }
+            destination.setLastModified(source.lastModified())
+        }
+    }
+
+    private fun isWithin(parent: File, child: File): Boolean {
+        val p = parent.canonicalPath
+        val c = child.canonicalPath
+        return c == p || c.startsWith(p + File.separator)
+    }
+}
+
+private fun fileIcon(file: File): String = when (file.extension.lowercase(Locale.ROOT)) {
+    "apk", "apks", "xapk" -> "📦"
+    "zip", "7z", "rar", "tar", "gz", "xz" -> "🗜️"
+    "jpg", "jpeg", "png", "webp", "gif", "bmp" -> "🖼️"
+    "mp4", "mkv", "webm", "avi", "mp3", "wav", "flac" -> "🎵"
+    "kt", "java", "smali", "js", "py", "xml", "json", "gradle" -> "🧩"
+    "pdf" -> "📕"
+    else -> "📄"
+}
+
+private fun dateText(time: Long): String =
+    if (time <= 0) "Unknown date" else DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(time))
+
+private fun directorySize(file: File): Long {
+    if (!file.isDirectory) return file.length()
+    return file.listFiles()?.sumOf { child ->
+        if (Files.isSymbolicLink(child.toPath())) 0L else directorySize(child)
+    } ?: 0L
+}
+
 private fun formatSize(bytes: Long): String = when {
     bytes < 1024 -> "$bytes B"
-    bytes < 1024L * 1024 -> "${bytes / 1024} KB"
-    bytes < 1024L * 1024 * 1024 -> "${bytes / (1024 * 1024)} MB"
-    else -> "${bytes / (1024L * 1024 * 1024)} GB"
+    bytes < 1024L * 1024 -> String.format(Locale.ROOT, "%.1f KB", bytes / 1024.0)
+    bytes < 1024L * 1024 * 1024 -> String.format(Locale.ROOT, "%.1f MB", bytes / (1024.0 * 1024))
+    else -> String.format(Locale.ROOT, "%.2f GB", bytes / (1024.0 * 1024 * 1024))
 }
