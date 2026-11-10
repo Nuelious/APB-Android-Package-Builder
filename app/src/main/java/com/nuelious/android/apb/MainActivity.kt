@@ -244,8 +244,10 @@ class MainActivity:ComponentActivity(){
    val result=runCatching {
     store.syncConfig(p)
     builder.build(p) { line ->
+     // Persist every Gradle line on the IO thread; the visible UI buffer is bounded.
+     fullLogFile?.appendText(line + System.lineSeparator())
      runOnUiThread {
-      logs=(logs+line+"\n").takeLast(30000)
+      logs=(logs+line+"\\n").takeLast(50000)
       lastBuildOutputAt=System.currentTimeMillis()
       val clean=line.trim()
       if(clean.isNotEmpty()) buildPhase=clean.take(150)
@@ -255,7 +257,9 @@ class MainActivity:ComponentActivity(){
    timer.cancel()
    lastApkPath=result.output
    status=if(result.success) "Build complete" else "Build failed: "+result.message
-   logs=(logs+"\n"+result.message+(result.output?.let{"\nAPK: "+it}?:"")).takeLast(30000)
+   val ending = result.message + (result.output?.let { "\\nAPK: " + it } ?: "")
+   runCatching { fullLogFile?.appendText(System.lineSeparator() + ending + System.lineSeparator()) }
+   logs=(logs+"\\n"+ending).takeLast(50000)
    buildBusy=false
    window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
   }
