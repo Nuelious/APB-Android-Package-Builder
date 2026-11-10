@@ -15,7 +15,10 @@ data class RuntimeProgress(
     val message: String,
     val downloaded: Long = 0,
     val total: Long = -1,
-    val complete: Boolean = false
+    val complete: Boolean = false,
+    val percent: Int = if (total > 0) ((downloaded * 100) / total).toInt().coerceIn(0, 100) else 0,
+    val currentFile: String = "",
+    val details: String = ""
 )
 
 /** Installs the ZIP embedded in the APK; no runtime network download is performed on-device. */
@@ -123,8 +126,12 @@ class RuntimeBootstrap(private val context: Context) {
     private fun extractZip(archive: File, destination: File, onProgress: ((String, Long, Long) -> Unit)? = null) {
         ZipFile.builder().setFile(archive).get().use { zip ->
             val entries = zip.entries
+            val scan = zip.entries
+            var totalBytes = 0L
+            while (scan.hasMoreElements()) { val item = scan.nextElement(); if (!item.isDirectory && !item.isUnixSymlink && item.size > 0) totalBytes += item.size }
             var count = 0
             var expanded = 0L
+            var lastPercent = -1
             while (entries.hasMoreElements()) {
                 val entry = entries.nextElement()
                 count++
@@ -153,6 +160,8 @@ class RuntimeBootstrap(private val context: Context) {
                                     val n = input.read(buffer)
                                     if (n < 0) break
                                     expanded += n
+                                    val percent = if (totalBytes > 0) ((expanded * 100) / totalBytes).toInt().coerceIn(0, 99) else 0
+                                    if (percent != lastPercent) { lastPercent = percent; onProgress?.invoke(entry.name, expanded, totalBytes) }
                                     require(expanded <= 12L * 1024 * 1024 * 1024) { "Expanded runtime exceeds 12 GiB." }
                                     out.write(buffer, 0, n)
                                 }

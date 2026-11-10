@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
@@ -61,14 +62,11 @@ class MainActivity:ComponentActivity(){
        Text("ARM64 build environment", style=MaterialTheme.typography.titleMedium)
        Text(if(runtimeReady) "Linux ARM64, JDK 17, Gradle and Android build tools are installed in APB private storage."
             else "The initial runtime download is several hundred MB and needs over 1 GB of free internal storage. Wi-Fi is recommended.")
-       if(runtimeBusy) {
-        if(runtimeProgress.total > 0) LinearProgressIndicator(progress = { (runtimeProgress.downloaded.toFloat() / runtimeProgress.total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
-        else LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        Text(runtimeProgress.message)
-       } else if(!runtimeReady) { Button(onClick = { installRuntime(force = false) }) { Text("Install build environment") }; OutlinedButton(onClick = { runtimeZipPicker.launch(arrayOf("application/zip", "application/octet-stream", "application/x-zip-compressed")) }) { Text("Choose runtime ZIP…") } }
+       if(runtimeBusy) { BucketProgressPanel(runtimeProgress.percent, runtimeProgress.message, runtimeProgress.currentFile, runtimeProgress.details, runtimeProgress.downloaded, runtimeProgress.total, "install") } else if(!runtimeReady) { Button(onClick = { installRuntime(force = false) }) { Text("Install build environment") }; OutlinedButton(onClick = { runtimeZipPicker.launch(arrayOf("application/zip", "application/octet-stream", "application/x-zip-compressed")) }) { Text("Choose runtime ZIP…") } }
        else {
         Text("Runtime verified and ready.")
         OutlinedButton(onClick = { installRuntime(force = true) }) { Text("Reinstall build environment") }
+        OutlinedButton(onClick = { runtimeZipPicker.launch(arrayOf("application/zip", "application/octet-stream", "application/x-zip-compressed")) }) { Text("Install from ZIP…") }
        }
        runtimeError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
       }

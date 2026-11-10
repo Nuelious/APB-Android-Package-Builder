@@ -120,6 +120,12 @@ private fun FileManagerScreen(
     var replaceTarget by remember { mutableStateOf<File?>(null) }
     var pendingPaste by remember { mutableStateOf<List<File>>(emptyList()) }
     var busy by remember { mutableStateOf(false) }
+    var progressPercent by remember { mutableIntStateOf(0) }
+    var progressTitle by remember { mutableStateOf("") }
+    var progressFile by remember { mutableStateOf("") }
+    var progressKind by remember { mutableStateOf("copy") }
+    var progressInfo by remember { mutableStateOf("") }
+    var showProgressInfo by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("Ready") }
     var refreshKey by remember { mutableIntStateOf(0) }
 
@@ -172,10 +178,16 @@ private fun FileManagerScreen(
     fun perform(message: String, operation: suspend () -> String) {
         if (busy) return
         busy = true
+        progressPercent = 0
+        progressTitle = message
+        progressFile = ""
+        progressInfo = "Preparing operation…"
+        progressKind = when { message.contains("Extract", true) -> "extract"; message.contains("Delet", true) -> "delete"; message.contains("Mov", true) -> "move"; message.contains("Renam", true) -> "rename"; else -> "copy" }
         status = message
         scope.launch {
             val result = runCatching { withContext(Dispatchers.IO) { operation() } }
             status = result.getOrElse { it.message ?: "Operation failed" }
+            if (result.isSuccess) { progressPercent = 100; progressInfo = status }
             busy = false
             refreshKey++
         }
@@ -284,7 +296,7 @@ private fun FileManagerScreen(
                         TextButton(onClick = { paste(false) }, enabled = clipboard.isNotEmpty() && !busy && !currentReadOnly) { Text("Paste here") }
                         if (clipboard.isNotEmpty()) TextButton(onClick = { clipboard = emptyList(); status = "Clipboard cleared" }) { Text("Clear") }
                     }
-                    if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    if (busy) BucketProgressPanel(progressPercent, progressTitle, progressFile, progressInfo, 0, 0, progressKind, onInfo = { showProgressInfo = true })
                 }
             }
         }
@@ -371,6 +383,8 @@ private fun FileManagerScreen(
             }
         }
     }
+
+    if (showProgressInfo) AlertDialog(onDismissRequest = { showProgressInfo = false }, title = { Text("Operation details") }, text = { Column { Text("Progress: $progressPercent%"); Text(progressTitle); if (progressFile.isNotBlank()) Text("Current: $progressFile"); Text(progressInfo) } }, confirmButton = { TextButton(onClick = { showProgressInfo = false }) { Text("Close") } })
 
     if (dialog.isNotBlank()) {
         AlertDialog(
