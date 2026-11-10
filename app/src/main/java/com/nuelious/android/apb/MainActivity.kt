@@ -117,6 +117,20 @@ class MainActivity:ComponentActivity(){
        }
        Text(status, style=MaterialTheme.typography.bodyMedium)
        if(logs.isNotBlank()) Text(logs.takeLast(14000), style=MaterialTheme.typography.bodySmall)
+       if(!buildBusy && logs.isNotBlank()) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(onClick = { logExportPicker.launch("APB-build-log.txt") }) { Text("Save full log") }
+        OutlinedButton(onClick = {
+         val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+         val text = fullLogFile?.takeIf { it.isFile }?.readText() ?: logs
+         clipboard.setPrimaryClip(ClipData.newPlainText("APB build log", text))
+         status = "Build log copied to clipboard."
+        }) { Text("Copy") }
+        OutlinedButton(onClick = {
+         val text = fullLogFile?.takeIf { it.isFile }?.readText() ?: logs
+         val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_SUBJECT, "APB build log").putExtra(Intent.EXTRA_TEXT, text)
+         startActivity(Intent.createChooser(send, "Share build log"))
+        }) { Text("Share") }
+       }
       }
      }
     }
