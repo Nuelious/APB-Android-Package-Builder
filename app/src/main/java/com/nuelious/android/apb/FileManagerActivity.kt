@@ -603,7 +603,7 @@ private object FileTransfer {
     fun deleteSafely(file: File): Boolean {
         if (!file.exists()) return true
         val measured = measure(file)
-        val state = ProgressState(measured.first, measured.second)
+        val state = ProgressState(0L, measured.second)
         fun remove(target: File): Boolean {
             if (Files.isSymbolicLink(target.toPath())) {
                 val ok = target.delete()
