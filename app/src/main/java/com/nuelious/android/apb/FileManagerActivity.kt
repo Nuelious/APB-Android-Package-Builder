@@ -577,7 +577,7 @@ private object FileTransfer {
                                     if (n < 0) break
                                     expanded += n
                                     require(expanded <= 4L * 1024 * 1024 * 1024) { "Expanded ZIP exceeds 4 GiB limit." }
-                                    progress.report(entry.name, n)
+                                    progress.report(entry.name, n.toLong())
                                     out.write(buffer, 0, n)
                                 }
                                 out.fd.sync()
@@ -662,7 +662,7 @@ private object FileTransfer {
                         val n = input.read(buffer)
                         if (n < 0) break
                         output.write(buffer, 0, n)
-                        progress.report(source.name, n)
+                        progress.report(source.name, n.toLong())
                     }
                     output.fd.sync()
                 }
