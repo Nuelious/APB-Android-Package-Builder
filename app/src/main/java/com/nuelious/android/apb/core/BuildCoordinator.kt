@@ -21,8 +21,29 @@ class BuildCoordinator(context:Context) {
    val out=File(project.root,c.output)
    check(out.canonicalPath.startsWith(project.root.canonicalPath+File.separator)){"Unsafe build output path."}
    out.mkdirs()
+   onLog("APB preflight")
+   onLog("Project root: ${project.root.canonicalPath}")
+   onLog("Config: ${project.configFile.canonicalPath}")
+   onLog("Engine: ${c.engine}")
+   onLog("Runtime: installed; ARM64 PRoot")
+   val settingsKts=File(project.root,"settings.gradle.kts")
+   val settingsGroovy=File(project.root,"settings.gradle")
+   val buildKts=File(project.root,"build.gradle.kts")
+   val buildGroovy=File(project.root,"build.gradle")
+   onLog("Project settings.gradle.kts: ${settingsKts.isFile}")
+   onLog("Project settings.gradle: ${settingsGroovy.isFile}")
+   onLog("Root build.gradle.kts: ${buildKts.isFile}")
+   onLog("Root build.gradle: ${buildGroovy.isFile}")
+   if(c.engine=="gradle") {
+    require(settingsKts.isFile || settingsGroovy.isFile) {
+     "This folder has no settings.gradle(.kts). Import the Android project's actual root folder, not its app module or source subfolder."
+    }
+    require(buildKts.isFile || buildGroovy.isFile) {
+     "This folder has no root build.gradle(.kts). Import the Android project's actual root folder."
+    }
+   }
    val command=when(c.engine) {
-    "gradle"->listOf("gradle","--no-daemon",if(b.optBoolean("offline"))"--offline" else "--stacktrace",
+    "gradle"->listOf("gradle","--no-daemon","--console=plain","--info","--stacktrace",
      "-Pandroid.aapt2FromMavenOverride=/usr/bin/aapt2","-p","/workspace",b.optString("task","assembleDebug"))
     "apktool","smali"->{
      require(File(project.root,"AndroidManifest.xml").isFile&&File(project.root,"apktool.yml").isFile){"A complete APKTool project requires AndroidManifest.xml, resources and apktool.yml."}
@@ -31,6 +52,8 @@ class BuildCoordinator(context:Context) {
     "dex"->error("A DEX-only folder cannot produce a complete APK without a manifest and resources.")
     else->error("Custom build engines are not available.")
    }
+   onLog("Command: ${command.joinToString(" ")}")
+   onLog("Starting build process…")
    val process=LinuxRuntimeExecutor(app,project.root).start(command)
    process.inputStream.bufferedReader().useLines{lines->lines.forEach(onLog)}
    val code=process.waitFor()
