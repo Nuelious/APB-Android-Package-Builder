@@ -43,8 +43,40 @@ class BuildCoordinator(context:Context) {
     }
    }
    val command=when(c.engine) {
-    "gradle"->listOf("gradle","--no-daemon","--console=plain","--info","--stacktrace",
-     "-Pandroid.aapt2FromMavenOverride=/usr/bin/aapt2","-p","/workspace",b.optString("task","assembleDebug"))
+    "gradle"->{
+     // The imported project's settings.gradle.kts controls its plugin repositories.
+     // Inject a Gradle init script so APB can resolve Android plugin IDs directly
+     // to their implementation modules even when the marker artifact is unavailable.
+     val init=File(project.root,".apb-gradle-init.gradle")
+     init.writeText("""
+       beforeSettings { settings ->
+         settings.pluginManagement {
+           repositories {
+             google()
+             mavenCentral()
+             gradlePluginPortal()
+           }
+           resolutionStrategy {
+             eachPlugin {
+               if (requested.id.id == "com.android.application" ||
+                   requested.id.id == "com.android.library" ||
+                   requested.id.id == "com.android.test" ||
+                   requested.id.id == "com.android.dynamic-feature") {
+                 useModule("com.android.tools.build:gradle:${requested.version}")
+               } else if (requested.id.id == "org.jetbrains.kotlin.android" ||
+                          requested.id.id == "org.jetbrains.kotlin.jvm" ||
+                          requested.id.id == "org.jetbrains.kotlin.kapt") {
+                 useModule("org.jetbrains.kotlin:kotlin-gradle-plugin:${requested.version}")
+               }
+             }
+           }
+         }
+       }
+     """.trimIndent())
+     listOf("gradle","--no-daemon","--console=plain","--info","--stacktrace",
+      "--init-script","/workspace/.apb-gradle-init.gradle",
+      "-Pandroid.aapt2FromMavenOverride=/usr/bin/aapt2","-p","/workspace",b.optString("task","assembleDebug"))
+    }
     "apktool","smali"->{
      require(File(project.root,"AndroidManifest.xml").isFile&&File(project.root,"apktool.yml").isFile){"A complete APKTool project requires AndroidManifest.xml, resources and apktool.yml."}
      listOf("java","-jar","/apb-runtime/apktool.jar","b","/workspace","-o","/workspace/${c.output}/apb-unsigned.apk")
