@@ -1,5 +1,8 @@
 package com.nuelious.android.apb.storage
 import android.content.Context
+import android.os.Build
+import android.os.Environment
+import com.nuelious.android.apb.runtime.RuntimeStorage
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import com.nuelious.android.apb.core.ProjectScanner
@@ -8,10 +11,13 @@ import java.io.File
 import java.util.UUID
 
 class ProjectStore(private val context:Context) {
- private val base=File(context.filesDir,"projects").apply{mkdirs()}
+ private val legacyBase=File(context.filesDir,"projects").apply{mkdirs()}
+ private val base:File get()=if(Build.VERSION.SDK_INT<30||Environment.isExternalStorageManager()) RuntimeStorage.directory(context) else legacyBase
  private val prefs=context.getSharedPreferences("apb-project-links",Context.MODE_PRIVATE)
 
- fun listProjects():List<ApbProject> = base.listFiles()?.filter{it.isDirectory}?.mapNotNull{dir->
+ fun listProjects():List<ApbProject> {
+  migrateLegacyProjects()
+  return base.listFiles()?.filter{it.isDirectory}?.mapNotNull{dir->
   runCatching {
    val cf=File(dir,"apb.json")
    val p=ApbProject(dir.name,"",ProjectType.CUSTOM,dir,cf)
@@ -20,6 +26,17 @@ class ProjectStore(private val context:Context) {
    p.copy(name=c.projectName,type=c.projectType)
   }.getOrNull()
  }?: emptyList()
+ }
+
+ private fun migrateLegacyProjects() {
+  val destination=base
+  if(destination.canonicalFile==legacyBase.canonicalFile)return
+  legacyBase.listFiles()?.forEach { source ->
+   val target=File(destination,source.name)
+   if(!target.exists()) runCatching { source.copyRecursively(target,overwrite=false) }
+   if(target.exists()) source.deleteRecursively()
+  }
+ }
 
  fun importTree(uri:Uri,typeOverride:ProjectType?=null):ApbProject {
   val doc=DocumentFile.fromTreeUri(context,uri)?:error("Cannot open folder")
