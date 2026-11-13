@@ -62,11 +62,11 @@ class BuildCoordinator(context:Context) {
                    requested.id.id == "com.android.library" ||
                    requested.id.id == "com.android.test" ||
                    requested.id.id == "com.android.dynamic-feature") {
-                 useModule("com.android.tools.build:gradle:${requested.version}")
+                 useModule("com.android.tools.build:gradle:${'$'}{requested.version}")
                } else if (requested.id.id == "org.jetbrains.kotlin.android" ||
                           requested.id.id == "org.jetbrains.kotlin.jvm" ||
                           requested.id.id == "org.jetbrains.kotlin.kapt") {
-                 useModule("org.jetbrains.kotlin:kotlin-gradle-plugin:${requested.version}")
+                 useModule("org.jetbrains.kotlin:kotlin-gradle-plugin:${'$'}{requested.version}")
                }
              }
            }
