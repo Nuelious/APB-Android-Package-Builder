@@ -33,6 +33,7 @@ class LinuxRuntimeExecutor(private val runtime:File, private val project:File) {
    "HOME=/root","TMPDIR=/tmp",
    "JAVA_HOME=$runtimeMount/jdk17-arm64",
    "GRADLE_USER_HOME=/root/.gradle",
+   "GRADLE_OPTS=-Dorg.gradle.internal.http.connectionTimeout=15000 -Dorg.gradle.internal.http.socketTimeout=30000",
    "ANDROID_HOME=$runtimeMount/android-sdk",
    "ANDROID_SDK_ROOT=$runtimeMount/android-sdk",
    "PATH=$runtimeMount/jdk17-arm64/bin:$runtimeMount/gradle-8/bin:$runtimeMount/android-sdk/platform-tools:$runtimeMount/android-sdk/build-tools/35.0.0:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
